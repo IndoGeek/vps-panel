@@ -6,6 +6,7 @@ import (
 
 	"github.com/tanmay/vps-panel/agent/internal/identity"
 	"github.com/tanmay/vps-panel/agent/internal/process"
+	"github.com/tanmay/vps-panel/agent/internal/service"
 	"github.com/tanmay/vps-panel/agent/internal/system"
 	"github.com/tanmay/vps-panel/agent/internal/tmux"
 )
@@ -73,6 +74,24 @@ func main() {
 			p.UID,
 			p.State,
 			p.Command,
+		)
+	}
+	fmt.Println()
+	fmt.Println("Services")
+	fmt.Println("--------")
+
+	services, err := service.ListServices()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, svc := range services {
+		fmt.Printf(
+			"%-30s active=%-5t enabled=%-5t %s\n",
+			svc.Name,
+			svc.Active,
+			svc.Enabled,
+			svc.Description,
 		)
 	}
 
