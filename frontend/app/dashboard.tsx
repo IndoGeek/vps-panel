@@ -53,88 +53,43 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
       {/* MENU TRIGGER                                              */}
       {/* ========================================================= */}
 
-      <div
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
         aria-label="Open navigation"
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen(true)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
+        onPointerUp={(event) => {
+          if (event.pointerType === "touch") {
             setMenuOpen(true);
           }
         }}
+        className="fixed left-[18px] top-[18px] z-[10000] flex h-[50px] w-[50px] items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 shadow-xl transition active:scale-95 hover:bg-zinc-800"
         style={{
-          position: "fixed",
-          top: "18px",
-          left: "18px",
-          width: "50px",
-          height: "50px",
-          zIndex: 10000,
-          borderRadius: "9999px",
-          border: "1px solid rgb(39, 39, 42)",
-          background: "rgb(24, 24, 27)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          userSelect: "none",
-          WebkitUserSelect: "none",
           WebkitTapHighlightColor: "transparent",
           touchAction: "manipulation",
-          boxShadow: "0 10px 30px rgba(0, 0, 0, 0.35)",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "4px",
-          }}
-        >
-          <span
-            style={{
-              width: "5px",
-              height: "5px",
-              borderRadius: "50%",
-              background: "#d4d4d8",
-            }}
-          />
-          <span
-            style={{
-              width: "5px",
-              height: "5px",
-              borderRadius: "50%",
-              background: "#d4d4d8",
-            }}
-          />
-          <span
-            style={{
-              width: "5px",
-              height: "5px",
-              borderRadius: "50%",
-              background: "#d4d4d8",
-            }}
-          />
-        </div>
-      </div>
+        <span className="flex items-center justify-center gap-1">
+          <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
+          <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
+          <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
+        </span>
+      </button>
 
       {/* ========================================================= */}
       {/* BACKDROP                                                  */}
       {/* ========================================================= */}
 
-      <div
+      <button
+        type="button"
+        aria-label="Close navigation"
         onClick={() => setMenuOpen(false)}
+        className="fixed inset-0 z-[9990] border-0 bg-black/60 p-0"
         style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 9990,
-          background: "rgba(0, 0, 0, 0.60)",
           opacity: menuOpen ? 1 : 0,
           pointerEvents: menuOpen ? "auto" : "none",
           transition: "opacity 180ms ease",
+          WebkitTapHighlightColor: "transparent",
         }}
       />
 
@@ -170,35 +125,18 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
 
             <p className="mt-1 text-lg font-semibold">{snapshot.System.hostname}</p>
           </div>
-
-          <div
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             aria-label="Close navigation"
             onClick={() => setMenuOpen(false)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                setMenuOpen(false);
-              }
-            }}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-2xl text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100 active:scale-95"
             style={{
-              width: "40px",
-              height: "40px",
-              borderRadius: "9999px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              color: "#a1a1aa",
-              fontSize: "24px",
-              userSelect: "none",
               WebkitTapHighlightColor: "transparent",
               touchAction: "manipulation",
             }}
           >
             ×
-          </div>
+          </button>
         </div>
 
         {/* NAVIGATION PILLS */}
@@ -206,40 +144,21 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
         <nav className="space-y-3">
           {navigation.map((item) => {
             const active = view === item.id;
-
             return (
-              <div
+              <button
                 key={item.id}
-                role="button"
-                tabIndex={0}
+                type="button"
                 onClick={() => changeView(item.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    changeView(item.id);
-                  }
-                }}
+                className="flex min-h-12 w-full items-center rounded-full px-[18px] text-left text-sm font-medium transition active:scale-[0.98]"
                 style={{
-                  width: "100%",
-                  minHeight: "48px",
-                  borderRadius: "9999px",
-                  display: "flex",
-                  alignItems: "center",
-                  padding: "0 18px",
-                  cursor: "pointer",
-                  userSelect: "none",
-                  WebkitUserSelect: "none",
                   WebkitTapHighlightColor: "transparent",
                   touchAction: "manipulation",
                   background: active ? "rgb(244, 244, 245)" : "rgb(39, 39, 42)",
                   color: active ? "rgb(24, 24, 27)" : "rgb(212, 212, 216)",
-                  fontSize: "14px",
-                  fontWeight: 500,
-                  transition: "background 150ms ease, color 150ms ease",
                 }}
               >
                 {item.label}
-              </div>
+              </button>
             );
           })}
         </nav>
