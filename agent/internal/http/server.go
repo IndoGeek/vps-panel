@@ -2,16 +2,17 @@ package httpapi
 
 import (
 	"encoding/json"
-	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
-
-	"github.com/creack/pty"
-	"github.com/gorilla/websocket"
+	"strings"
 
 	agentcore "github.com/tanmay/vps-panel/agent/internal/agent"
 	"github.com/tanmay/vps-panel/agent/internal/tmux"
+
+	"github.com/creack/pty"
+	"github.com/gorilla/websocket"
 )
 
 type Server struct {
@@ -125,9 +126,9 @@ var tmuxUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 
-	// The agent WebSocket is only intended to be reached by the
-	// backend on the server itself. The backend's WebSocket client
-	// does not send a browser Origin header.
+	// The agent WebSocket is only intended to be reached by
+	// the backend on the server itself. The backend's WebSocket
+	// client does not send a browser Origin header.
 	CheckOrigin: func(r *http.Request) bool {
 		return r.Header.Get("Origin") == ""
 	},
@@ -137,6 +138,37 @@ type resizeMessage struct {
 	Type string `json:"type"`
 	Cols uint16 `json:"cols"`
 	Rows uint16 `json:"rows"`
+}
+
+func tmuxCommandEnvironment() []string {
+	current := os.Environ()
+
+	environment := make([]string, 0, len(current)+1)
+
+	for _, value := range current {
+		// Never inherit TMUX into the web terminal client.
+		//
+		// If the agent itself is running inside tmux, inheriting
+		// this variable makes tmux treat attach-session as an
+		// operation from the existing tmux client instead of as
+		// an independent terminal client.
+		if strings.HasPrefix(value, "TMUX=") {
+			continue
+		}
+
+		environment = append(environment, value)
+	}
+
+	// A web terminal is a real PTY. Make sure tmux always gets
+	// a useful terminal type even if the agent was started from
+	// an environment with TERM unset or TERM=dumb.
+	term := os.Getenv("TERM")
+
+	if term == "" || term == "dumb" {
+		environment = append(environment, "TERM=xterm-256color")
+	}
+
+	return environment
 }
 
 func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +217,8 @@ func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
 		session,
 	)
 
+	command.Env = tmuxCommandEnvironment()
+
 	terminal, err := pty.Start(command)
 	if err != nil {
 		log.Printf(
@@ -195,7 +229,9 @@ func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
 
 		_ = conn.WriteMessage(
 			websocket.TextMessage,
-			[]byte("Failed to attach to tmux session.\r\n"),
+			[]byte(
+				"Failed to attach to tmux session.\r\n",
+			),
 		)
 
 		return
@@ -209,9 +245,9 @@ func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
 		commandDone <- command.Wait()
 	}()
 
-	// PTY -> WebSocket
 	outputDone := make(chan struct{})
 
+	// PTY -> WebSocket
 	go func() {
 		defer close(outputDone)
 
@@ -225,6 +261,12 @@ func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
 					websocket.BinaryMessage,
 					buffer[:n],
 				); writeErr != nil {
+					log.Printf(
+						"tmux terminal websocket write failed for %q: %v",
+						session,
+						writeErr,
+					)
+
 					return
 				}
 			}
@@ -239,6 +281,12 @@ func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
 	for {
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
+			log.Printf(
+				"tmux terminal websocket read ended for %q: %v",
+				session,
+				err,
+			)
+
 			break
 		}
 
@@ -251,6 +299,7 @@ func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
 				resize.Type == "resize" &&
 				resize.Cols > 0 &&
 				resize.Rows > 0 {
+
 				if err := pty.Setsize(terminal, &pty.Winsize{
 					Cols: resize.Cols,
 					Rows: resize.Rows,
@@ -266,6 +315,12 @@ func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if _, err := terminal.Write(payload); err != nil {
+				log.Printf(
+					"failed to write to tmux PTY %q: %v",
+					session,
+					err,
+				)
+
 				break
 			}
 		}
@@ -277,17 +332,30 @@ func (s *Server) handleTmuxConnect(w http.ResponseWriter, r *http.Request) {
 	case err := <-commandDone:
 		if err != nil {
 			log.Printf(
-				"tmux session %q ended: %v",
+				"tmux session %q exited with error: %v",
 				session,
 				err,
 			)
+		} else {
+			log.Printf(
+				"tmux session %q exited normally",
+				session,
+			)
 		}
+
 	case <-outputDone:
+		select {
+		case err := <-commandDone:
+			if err != nil {
+				log.Printf(
+					"tmux session %q exited with error: %v",
+					session,
+					err,
+				)
+			}
+		default:
+		}
 	}
 
 	log.Printf("tmux terminal disconnected: %s", session)
-
-	// Keep io imported intentionally as part of the terminal implementation
-	// contract for future streaming changes.
-	_ = io.EOF
 }

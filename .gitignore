@@ -7,6 +7,10 @@
 /bin/
 /dist/
 
+# Go build outputs
+/backend/server
+/agent/server
+
 # Node
 node_modules/
 .next/

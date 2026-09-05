@@ -140,9 +140,7 @@ export default function TerminalPage() {
             "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
           fontSize: 14,
           scrollback: 5000,
-
           allowProposedApi: true,
-
           theme: {
             background: "#09090b",
             foreground: "#f4f4f5",
@@ -298,6 +296,7 @@ export default function TerminalPage() {
 
     modifierRef.current = nextModifier;
     setModifier(nextModifier);
+
     terminalRef.current?.focus();
   };
 
@@ -345,13 +344,7 @@ export default function TerminalPage() {
           <button
             type="button"
             onClick={() => {
-              /*
-               * The terminal was opened from the Sessions view.
-               * Going back through browser history returns to
-               * that exact Sessions state instead of resetting
-               * the dashboard to its default view.
-               */
-              window.history.back();
+              window.location.href = "/?view=sessions";
             }}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-zinc-300 transition hover:bg-zinc-700 hover:text-white active:scale-95"
             aria-label="Back to sessions"

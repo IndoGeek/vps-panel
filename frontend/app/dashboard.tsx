@@ -23,6 +23,21 @@ export default function Dashboard({
   const [view, setView] = useState<View>("dashboard");
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedView = params.get("view");
+
+    if (
+      requestedView === "dashboard" ||
+      requestedView === "processes" ||
+      requestedView === "sessions" ||
+      requestedView === "services" ||
+      requestedView === "system"
+    ) {
+      setView(requestedView);
+    }
+  }, []);
+
+  useEffect(() => {
     setLastUpdated(new Date());
 
     const refresh = async () => {
@@ -56,6 +71,16 @@ export default function Dashboard({
   const changeView = (nextView: View) => {
     setView(nextView);
     setMenuOpen(false);
+
+    const url = new URL(window.location.href);
+
+    if (nextView === "dashboard") {
+      url.searchParams.delete("view");
+    } else {
+      url.searchParams.set("view", nextView);
+    }
+
+    window.history.replaceState({}, "", url.toString());
   };
 
   const openTerminal = (sessionName: string) => {
