@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/tanmay/vps-panel/agent/internal/identity"
+	"github.com/tanmay/vps-panel/agent/internal/tmux"
 )
 
 func main() {
@@ -28,6 +29,29 @@ func main() {
 			user.GID,
 			user.HomeDir,
 			user.Shell,
+		)
+	}
+
+	fmt.Println()
+	fmt.Println("Current User's tmux Sessions")
+	fmt.Println("----------------------------")
+
+	sessions, err := tmux.ListSessions()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if len(sessions) == 0 {
+		fmt.Println("No tmux sessions running.")
+		return
+	}
+
+	for _, session := range sessions {
+		fmt.Printf(
+			"%-20s windows=%-3d attached=%v\n",
+			session.Name,
+			session.Windows,
+			session.Attached,
 		)
 	}
 }
