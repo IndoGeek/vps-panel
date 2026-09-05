@@ -60,23 +60,25 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
       {/* MENU TRIGGER                                              */}
       {/* ========================================================= */}
 
-      <button
-        type="button"
-        aria-label="Open navigation"
-        aria-expanded={menuOpen}
-        onClick={() => setMenuOpen(true)}
-        className="fixed left-[18px] top-[18px] z-[10000] flex h-[50px] w-[50px] items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 shadow-xl transition hover:bg-zinc-800 active:scale-95"
-        style={{
-          WebkitTapHighlightColor: "transparent",
-          touchAction: "manipulation",
-        }}
-      >
-        <span className="flex items-center justify-center gap-1">
-          <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
-          <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
-          <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
-        </span>
-      </button>
+      {!menuOpen && (
+        <button
+          type="button"
+          aria-label="Open navigation"
+          aria-expanded={false}
+          onClick={() => setMenuOpen(true)}
+          className="fixed left-[18px] top-[18px] z-[10000] flex h-[50px] w-[50px] items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 shadow-xl transition hover:bg-zinc-800 active:scale-95"
+          style={{
+            WebkitTapHighlightColor: "transparent",
+            touchAction: "manipulation",
+          }}
+        >
+          <span className="flex items-center justify-center gap-1">
+            <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
+            <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
+            <span className="h-[5px] w-[5px] rounded-full bg-zinc-300" />
+          </span>
+        </button>
+      )}
 
       {/* ========================================================= */}
       {/* BACKDROP                                                  */}
