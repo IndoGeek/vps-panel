@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	agentcore "github.com/tanmay/vps-panel/agent/internal/agent"
+	"github.com/tanmay/vps-panel/agent/internal/tmux"
 )
 
 type Server struct {
@@ -32,7 +33,11 @@ func (s *Server) ListenAndServe() error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(
+			w,
+			"method not allowed",
+			http.StatusMethodNotAllowed,
+		)
 		return
 	}
 
@@ -45,14 +50,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(
+			w,
+			"method not allowed",
+			http.StatusMethodNotAllowed,
+		)
 		return
 	}
 
 	snapshot, err := agentcore.Collect()
 	if err != nil {
 		log.Printf("failed to collect snapshot: %v", err)
-		http.Error(w, "failed to collect snapshot", http.StatusInternalServerError)
+
+		http.Error(
+			w,
+			"failed to collect snapshot",
+			http.StatusInternalServerError,
+		)
 		return
 	}
 
@@ -65,19 +79,31 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTmuxSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(
+			w,
+			"method not allowed",
+			http.StatusMethodNotAllowed,
+		)
 		return
 	}
 
 	session := r.URL.Query().Get("name")
 
 	if session == "" {
-		http.Error(w, "session name is required", http.StatusBadRequest)
+		http.Error(
+			w,
+			"session name is required",
+			http.StatusBadRequest,
+		)
 		return
 	}
 
-	if !agentcore.HasTmuxSession(session) {
-		http.Error(w, "tmux session not found", http.StatusNotFound)
+	if !tmux.HasSession(session) {
+		http.Error(
+			w,
+			"tmux session not found",
+			http.StatusNotFound,
+		)
 		return
 	}
 

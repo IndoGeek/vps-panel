@@ -36,12 +36,19 @@ func ListSessions() ([]Session, error) {
 			return []Session{}, nil
 		}
 
-		return nil, fmt.Errorf("tmux list-sessions: %w: %s", err, stderr.String())
+		return nil, fmt.Errorf(
+			"tmux list-sessions: %w: %s",
+			err,
+			stderr.String(),
+		)
 	}
 
 	var sessions []Session
 
-	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+	for _, line := range strings.Split(
+		strings.TrimSpace(stdout.String()),
+		"\n",
+	) {
 		if line == "" {
 			continue
 		}
@@ -66,22 +73,23 @@ func ListSessions() ([]Session, error) {
 	}
 
 	return sessions, nil
+}
 
-	func HasSession(name string) bool {
-	   if name == "" {
-			  return false
-	   }
-
-		 session, err := ListSessions()
-	   if err != nil {
-			  return false
-		 }
-
-		for _, session := range sessions {
-				if session.Name == name {
-					return true
-				}
-		}
- 		return false
+func HasSession(name string) bool {
+	if name == "" {
+		return false
 	}
+
+	sessions, err := ListSessions()
+	if err != nil {
+		return false
+	}
+
+	for _, session := range sessions {
+		if session.Name == name {
+			return true
+		}
+	}
+
+	return false
 }
