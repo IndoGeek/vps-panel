@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -172,10 +173,27 @@ func NewRouter(authService *auth.Service) http.Handler {
 
 		frontendConn, err := terminalUpgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Printf("frontend terminal websocket upgrade failed: %v", err)
+			log.Printf(
+				"frontend terminal websocket upgrade failed: %v",
+				err,
+			)
 			return
 		}
-		defer frontendConn.Close()
+
+		log.Printf(
+			"frontend terminal websocket connected: session=%s remote=%s",
+			session,
+			r.RemoteAddr,
+		)
+
+		defer func() {
+			log.Printf(
+				"frontend terminal websocket closing: session=%s",
+				session,
+			)
+
+			_ = frontendConn.Close()
+		}()
 
 		agentConn, err := client.ConnectTmuxSession(session)
 		if err != nil {
@@ -185,28 +203,57 @@ func NewRouter(authService *auth.Service) http.Handler {
 				err,
 			)
 
-			_ = frontendConn.WriteMessage(
-				websocket.TextMessage,
-				[]byte("Failed to connect to the VPS agent.\r\n"),
+			_ = frontendConn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(
+					websocket.CloseInternalServerErr,
+					"failed to connect to agent",
+				),
+				time.Now().Add(time.Second),
 			)
 
 			return
 		}
-		defer agentConn.Close()
 
-		log.Printf("terminal proxy connected: %s", session)
+		defer func() {
+			log.Printf(
+				"agent websocket closing from backend: session=%s",
+				session,
+			)
 
-		proxyWebSocket(frontendConn, agentConn)
+			_ = agentConn.Close()
+		}()
 
-		log.Printf("terminal proxy disconnected: %s", session)
+		log.Printf(
+			"terminal proxy connected: session=%s frontend=%s agent=%s",
+			session,
+			frontendConn.RemoteAddr(),
+			agentConn.RemoteAddr(),
+		)
+
+		proxyWebSocket(
+			session,
+			frontendConn,
+			agentConn,
+		)
+
+		log.Printf(
+			"terminal proxy disconnected: session=%s",
+			session,
+		)
 	})
 
 	return mux
 }
 
 var terminalUpgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
+	ReadBufferSize:  32 * 1024,
+	WriteBufferSize: 32 * 1024,
+
+	// Do not negotiate compression on the browser-facing
+	// terminal connection. Terminal traffic is already small
+	// and this avoids unnecessary WebSocket extension handling.
+	EnableCompression: false,
 
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -221,6 +268,7 @@ var terminalUpgrader = websocket.Upgrader{
 }
 
 func proxyWebSocket(
+	session string,
 	frontendConn *websocket.Conn,
 	agentConn *websocket.Conn,
 ) {
@@ -231,6 +279,12 @@ func proxyWebSocket(
 		for {
 			messageType, payload, err := frontendConn.ReadMessage()
 			if err != nil {
+				log.Printf(
+					"terminal proxy frontend read ended: session=%s error=%v",
+					session,
+					err,
+				)
+
 				errors <- err
 				return
 			}
@@ -239,6 +293,12 @@ func proxyWebSocket(
 				messageType,
 				payload,
 			); err != nil {
+				log.Printf(
+					"terminal proxy agent write failed: session=%s error=%v",
+					session,
+					err,
+				)
+
 				errors <- err
 				return
 			}
@@ -250,6 +310,12 @@ func proxyWebSocket(
 		for {
 			messageType, payload, err := agentConn.ReadMessage()
 			if err != nil {
+				log.Printf(
+					"terminal proxy agent read ended: session=%s error=%v",
+					session,
+					err,
+				)
+
 				errors <- err
 				return
 			}
@@ -258,13 +324,81 @@ func proxyWebSocket(
 				messageType,
 				payload,
 			); err != nil {
+				log.Printf(
+					"terminal proxy frontend write failed: session=%s error=%v",
+					session,
+					err,
+				)
+
 				errors <- err
 				return
 			}
 		}
 	}()
 
-	<-errors
+	// Keep the connection alive and make broken connections
+	// detectable rather than silently waiting forever.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			deadline := time.Now().Add(5 * time.Second)
+
+			if err := frontendConn.WriteControl(
+				websocket.PingMessage,
+				nil,
+				deadline,
+			); err != nil {
+				log.Printf(
+					"terminal proxy frontend ping failed: session=%s error=%v",
+					session,
+					err,
+				)
+				return
+			}
+
+			if err := agentConn.WriteControl(
+				websocket.PingMessage,
+				nil,
+				deadline,
+			); err != nil {
+				log.Printf(
+					"terminal proxy agent ping failed: session=%s error=%v",
+					session,
+					err,
+				)
+				return
+			}
+		}
+	}()
+
+	// Wait for either direction to terminate.
+	err := <-errors
+
+	log.Printf(
+		"terminal proxy relay stopping: session=%s reason=%v",
+		session,
+		err,
+	)
+
+	// Send a proper close frame instead of simply dropping TCP.
+	closeMessage := websocket.FormatCloseMessage(
+		websocket.CloseNormalClosure,
+		"terminal proxy closed",
+	)
+
+	_ = frontendConn.WriteControl(
+		websocket.CloseMessage,
+		closeMessage,
+		time.Now().Add(time.Second),
+	)
+
+	_ = agentConn.WriteControl(
+		websocket.CloseMessage,
+		closeMessage,
+		time.Now().Add(time.Second),
+	)
 
 	_ = frontendConn.Close()
 	_ = agentConn.Close()

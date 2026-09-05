@@ -222,14 +222,23 @@ export default function TerminalPage() {
           terminal?.write("\r\n\x1b[31mWebSocket connection error.\x1b[0m\r\n");
         };
 
-        socket.onclose = () => {
+        socket.onclose = (event) => {
           if (disposed) {
             return;
           }
 
+          console.error("Terminal WebSocket closed:", {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+          });
+
           setStatus("Disconnected");
 
-          terminal?.write("\r\n\x1b[33mTerminal connection closed.\x1b[0m\r\n");
+          terminal?.write(
+            `\r\n\x1b[33mTerminal connection closed ` +
+              `(code ${event.code}${event.reason ? `: ${event.reason}` : ""}).\x1b[0m\r\n`,
+          );
         };
 
         terminal.onData((data) => {

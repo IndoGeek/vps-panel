@@ -38,6 +38,27 @@ const server = createServer(async (req, res) => {
 
 const websocketServer = new WebSocketServer({
   noServer: true,
+
+  // Do not use compression for the terminal.
+  // This keeps terminal frames simple and avoids unnecessary
+  // extension negotiation on mobile browsers.
+  perMessageDeflate: false,
+});
+
+websocketServer.on("connection", (browserSocket, request) => {
+  console.log("Terminal browser WebSocket accepted:", request.url);
+
+  browserSocket.on("close", (code, reason) => {
+    console.log(
+      "Terminal browser WebSocket closed:",
+      `code=${code}`,
+      `reason=${reason?.toString() || "<none>"}`,
+    );
+  });
+
+  browserSocket.on("error", (error) => {
+    console.error("Terminal browser WebSocket error:", error);
+  });
 });
 
 server.on("upgrade", (request, socket, head) => {
@@ -45,59 +66,74 @@ server.on("upgrade", (request, socket, head) => {
 
   try {
     requestUrl = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
-  } catch {
+  } catch (error) {
+    console.error("Invalid WebSocket URL:", error);
+
     socket.destroy();
     return;
   }
 
   /*
-   * Only intercept the VPS terminal WebSocket.
+   * Only handle the VPS terminal WebSocket.
    *
-   * Everything else is rejected here instead of accidentally
-   * being forwarded to the backend.
+   * Other WebSocket paths must not be intercepted.
    */
   if (requestUrl.pathname !== "/api/v1/tmux/connect") {
     socket.destroy();
     return;
   }
 
+  console.log("Terminal browser WebSocket upgrade:", requestUrl.pathname + requestUrl.search);
+
   websocketServer.handleUpgrade(request, socket, head, (browserSocket) => {
+    websocketServer.emit("connection", browserSocket, request);
+
     const backendUrl = new URL(backendWsUrl);
 
     backendUrl.pathname = "/api/v1/tmux/connect";
     backendUrl.search = requestUrl.search;
 
-    /*
-     * Forward the browser's authentication cookie to the Go
-     * backend. The backend uses this cookie to authenticate
-     * the WebSocket connection.
-     */
     const headers = {};
 
     if (request.headers.cookie) {
       headers.cookie = request.headers.cookie;
     }
 
+    console.log("Connecting terminal proxy to backend:", backendUrl.toString());
+
     const backendSocket = new WebSocket(backendUrl.toString(), {
       headers,
+      perMessageDeflate: false,
     });
 
     let closed = false;
 
-    const closeBoth = () => {
+    const closeBoth = (reason = "proxy closed") => {
       if (closed) {
         return;
       }
 
       closed = true;
 
-      try {
-        browserSocket.close();
-      } catch {}
+      console.log("Closing terminal proxy:", reason);
 
-      try {
-        backendSocket.close();
-      } catch {}
+      if (
+        browserSocket.readyState === WebSocket.OPEN ||
+        browserSocket.readyState === WebSocket.CONNECTING
+      ) {
+        try {
+          browserSocket.close(1000, reason.slice(0, 120));
+        } catch {}
+      }
+
+      if (
+        backendSocket.readyState === WebSocket.OPEN ||
+        backendSocket.readyState === WebSocket.CONNECTING
+      ) {
+        try {
+          backendSocket.close(1000, reason.slice(0, 120));
+        } catch {}
+      }
     };
 
     browserSocket.on("message", (data, isBinary) => {
@@ -105,9 +141,15 @@ server.on("upgrade", (request, socket, head) => {
         return;
       }
 
-      backendSocket.send(data, {
-        binary: isBinary,
-      });
+      try {
+        backendSocket.send(data, {
+          binary: isBinary,
+        });
+      } catch (error) {
+        console.error("Browser -> backend terminal send failed:", error);
+
+        closeBoth("browser to backend send failed");
+      }
     });
 
     backendSocket.on("message", (data, isBinary) => {
@@ -115,18 +157,15 @@ server.on("upgrade", (request, socket, head) => {
         return;
       }
 
-      browserSocket.send(data, {
-        binary: isBinary,
-      });
-    });
+      try {
+        browserSocket.send(data, {
+          binary: isBinary,
+        });
+      } catch (error) {
+        console.error("Backend -> browser terminal send failed:", error);
 
-    browserSocket.on("close", () => {
-      closeBoth();
-    });
-
-    browserSocket.on("error", (error) => {
-      console.error("Browser WebSocket error:", error);
-      closeBoth();
+        closeBoth("backend to browser send failed");
+      }
     });
 
     backendSocket.on("open", () => {
@@ -136,19 +175,74 @@ server.on("upgrade", (request, socket, head) => {
       );
     });
 
-    backendSocket.on("close", () => {
-      closeBoth();
+    backendSocket.on("close", (code, reason) => {
+      console.log(
+        "Terminal backend WebSocket closed:",
+        `code=${code}`,
+        `reason=${reason?.toString() || "<none>"}`,
+      );
+
+      closeBoth(`backend closed ${code} ${reason?.toString() || ""}`.trim());
     });
 
     backendSocket.on("error", (error) => {
       console.error("Backend terminal WebSocket error:", error);
 
-      if (browserSocket.readyState === WebSocket.OPEN) {
-        browserSocket.send("\r\n\x1b[31mTerminal backend connection failed.\x1b[0m\r\n");
+      closeBoth("backend websocket error");
+    });
+
+    browserSocket.on("close", (code, reason) => {
+      console.log(
+        "Terminal browser socket closed:",
+        `code=${code}`,
+        `reason=${reason?.toString() || "<none>"}`,
+      );
+
+      if (!closed) {
+        closed = true;
+
+        if (
+          backendSocket.readyState === WebSocket.OPEN ||
+          backendSocket.readyState === WebSocket.CONNECTING
+        ) {
+          backendSocket.close(1000, "browser disconnected");
+        }
+      }
+    });
+
+    browserSocket.on("error", (error) => {
+      console.error("Browser terminal WebSocket error:", error);
+
+      closeBoth("browser websocket error");
+    });
+
+    /*
+     * Keep the internal connection alive.
+     */
+    const heartbeat = setInterval(() => {
+      if (closed) {
+        clearInterval(heartbeat);
+        return;
       }
 
-      closeBoth();
-    });
+      if (backendSocket.readyState === WebSocket.OPEN) {
+        try {
+          backendSocket.ping();
+        } catch (error) {
+          console.error("Backend terminal ping failed:", error);
+
+          clearInterval(heartbeat);
+          closeBoth("backend ping failed");
+        }
+      }
+    }, 30000);
+
+    const cleanupHeartbeat = () => {
+      clearInterval(heartbeat);
+    };
+
+    browserSocket.once("close", cleanupHeartbeat);
+    backendSocket.once("close", cleanupHeartbeat);
   });
 });
 
