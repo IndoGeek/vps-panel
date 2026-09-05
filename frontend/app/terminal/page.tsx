@@ -7,16 +7,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { getMe } from "@/lib/api";
 
-function getWebSocketBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_BACKEND_WS_URL;
-
-  if (configured) {
-    return configured;
-  }
-
+function getWebSocketUrl(session: string): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-  return `${protocol}//${window.location.hostname}:8090`;
+  return `${protocol}//${window.location.host}/api/v1/tmux/connect?name=${encodeURIComponent(
+    session,
+  )}`;
 }
 
 export default function TerminalPage() {
@@ -28,6 +24,7 @@ export default function TerminalPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
     const session = params.get("session");
 
     if (!session) {
@@ -42,6 +39,7 @@ export default function TerminalPage() {
     let socket: WebSocket | null = null;
 
     let disposed = false;
+    let cleanupResize: (() => void) | undefined;
 
     const sendResize = () => {
       if (!socket || socket.readyState !== WebSocket.OPEN || !terminal) {
@@ -59,6 +57,10 @@ export default function TerminalPage() {
 
     const connect = async () => {
       try {
+        /*
+         * Make sure the browser still has a valid panel
+         * authentication session before opening the terminal.
+         */
         const me = await getMe();
 
         if (!me.authenticated) {
@@ -66,12 +68,19 @@ export default function TerminalPage() {
           return;
         }
 
-        setAuthenticated(true);
-
-        if (!terminalContainerRef.current || disposed) {
+        if (disposed) {
           return;
         }
 
+        setAuthenticated(true);
+
+        if (!terminalContainerRef.current) {
+          return;
+        }
+
+        /*
+         * Create xterm.
+         */
         terminal = new Terminal({
           cursorBlink: true,
           convertEol: false,
@@ -79,6 +88,7 @@ export default function TerminalPage() {
             "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
           fontSize: 14,
           scrollback: 5000,
+
           theme: {
             background: "#09090b",
             foreground: "#f4f4f5",
@@ -90,15 +100,31 @@ export default function TerminalPage() {
         fitAddon = new FitAddon();
 
         terminal.loadAddon(fitAddon);
+
         terminal.open(terminalContainerRef.current);
 
         fitAddon.fit();
 
-        const websocketBase = getWebSocketBaseUrl();
+        /*
+         * IMPORTANT:
+         *
+         * The WebSocket now connects to the SAME host/port
+         * that served the web panel.
+         *
+         * Example:
+         *
+         * http://127.0.0.1:3000
+         *        ↓
+         * ws://127.0.0.1:3000/api/v1/tmux/connect
+         *
+         * frontend/server.mjs then proxies the WebSocket
+         * internally to:
+         *
+         * ws://127.0.0.1:8090/api/v1/tmux/connect
+         */
+        const websocketUrl = getWebSocketUrl(session);
 
-        socket = new WebSocket(
-          `${websocketBase}/api/v1/tmux/connect?name=${encodeURIComponent(session)}`,
-        );
+        socket = new WebSocket(websocketUrl);
 
         socket.binaryType = "arraybuffer";
 
@@ -110,6 +136,7 @@ export default function TerminalPage() {
           setStatus("Connected");
 
           fitAddon?.fit();
+
           sendResize();
 
           terminal?.focus();
@@ -127,46 +154,68 @@ export default function TerminalPage() {
 
           if (event.data instanceof ArrayBuffer) {
             terminal.write(new Uint8Array(event.data));
+
             return;
           }
 
           if (event.data instanceof Blob) {
-            event.data.arrayBuffer().then((buffer) => {
-              if (!disposed) {
-                terminal?.write(new Uint8Array(buffer));
-              }
-            });
+            event.data
+              .arrayBuffer()
+              .then((buffer) => {
+                if (!disposed) {
+                  terminal?.write(new Uint8Array(buffer));
+                }
+              })
+              .catch((error) => {
+                console.error("Failed to read terminal data:", error);
+              });
           }
         };
 
-        socket.onerror = () => {
-          if (!disposed) {
-            setStatus("Connection error");
-            terminal?.write("\r\n\x1b[31mWebSocket connection error.\x1b[0m\r\n");
+        socket.onerror = (event) => {
+          console.error("Terminal WebSocket error:", event);
+
+          if (disposed) {
+            return;
           }
+
+          setStatus("Connection error");
+
+          terminal?.write("\r\n\x1b[31mWebSocket connection error.\x1b[0m\r\n");
         };
 
         socket.onclose = () => {
-          if (!disposed) {
-            setStatus("Disconnected");
-            terminal?.write("\r\n\x1b[33mTerminal connection closed.\x1b[0m\r\n");
+          if (disposed) {
+            return;
           }
+
+          setStatus("Disconnected");
+
+          terminal?.write("\r\n\x1b[33mTerminal connection closed.\x1b[0m\r\n");
         };
 
+        /*
+         * Keyboard input -> WebSocket -> backend -> tmux.
+         */
         terminal.onData((data) => {
           if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(data);
           }
         });
 
+        /*
+         * Resize terminal when the browser/device changes
+         * dimensions.
+         */
         const handleResize = () => {
           fitAddon?.fit();
+
           sendResize();
         };
 
         window.addEventListener("resize", handleResize);
 
-        return () => {
+        cleanupResize = () => {
           window.removeEventListener("resize", handleResize);
         };
       } catch (error) {
@@ -178,11 +227,7 @@ export default function TerminalPage() {
       }
     };
 
-    let cleanupResize: (() => void) | undefined;
-
-    connect().then((cleanup) => {
-      cleanupResize = cleanup;
-    });
+    void connect();
 
     return () => {
       disposed = true;
@@ -190,7 +235,9 @@ export default function TerminalPage() {
       cleanupResize?.();
 
       socket?.close();
+
       terminal?.dispose();
+
       fitAddon?.dispose();
     };
   }, []);
