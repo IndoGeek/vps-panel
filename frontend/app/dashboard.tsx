@@ -9,12 +9,19 @@ type View = "dashboard" | "processes" | "services" | "system";
 
 export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [lastUpdated, setLastUpdated] = useState(new Date());
+
+  // Keep the initial server/client render identical.
+  // The timestamp is populated after hydration.
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
   const [refreshing, setRefreshing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [view, setView] = useState<View>("dashboard");
 
   useEffect(() => {
+    // Set the initial client-side timestamp after hydration.
+    setLastUpdated(new Date());
+
     const refresh = async () => {
       try {
         setRefreshing(true);
@@ -58,12 +65,7 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
         aria-label="Open navigation"
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen(true)}
-        onPointerUp={(event) => {
-          if (event.pointerType === "touch") {
-            setMenuOpen(true);
-          }
-        }}
-        className="fixed left-[18px] top-[18px] z-[10000] flex h-[50px] w-[50px] items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 shadow-xl transition active:scale-95 hover:bg-zinc-800"
+        className="fixed left-[18px] top-[18px] z-[10000] flex h-[50px] w-[50px] items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 shadow-xl transition hover:bg-zinc-800 active:scale-95"
         style={{
           WebkitTapHighlightColor: "transparent",
           touchAction: "manipulation",
@@ -83,6 +85,7 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
       <button
         type="button"
         aria-label="Close navigation"
+        tabIndex={menuOpen ? 0 : -1}
         onClick={() => setMenuOpen(false)}
         className="fixed inset-0 z-[9990] border-0 bg-black/60 p-0"
         style={{
@@ -90,6 +93,7 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
           pointerEvents: menuOpen ? "auto" : "none",
           transition: "opacity 180ms ease",
           WebkitTapHighlightColor: "transparent",
+          touchAction: "manipulation",
         }}
       />
 
@@ -99,32 +103,21 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
 
       <aside
         aria-hidden={!menuOpen}
+        className="fixed left-0 top-0 z-[9995] h-screen w-[290px] max-w-[85vw] overflow-y-auto rounded-r-[24px] border-r border-zinc-800 bg-zinc-900 shadow-[20px_0_60px_rgba(0,0,0,0.50)]"
         style={{
-          position: "fixed",
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: "290px",
-          maxWidth: "85vw",
-          zIndex: 9995,
-          padding: "24px 16px",
-          background: "rgb(24, 24, 27)",
-          borderRight: "1px solid rgb(39, 39, 42)",
-          borderRadius: "0 24px 24px 0",
-          boxShadow: "20px 0 60px rgba(0, 0, 0, 0.50)",
           transform: menuOpen ? "translateX(0)" : "translateX(-105%)",
           transition: "transform 220ms ease",
-          overflowY: "auto",
         }}
       >
         {/* DRAWER HEADER */}
 
-        <div className="mb-8 flex items-center justify-between px-2">
+        <div className="flex items-center justify-between px-6 pb-8 pt-7">
           <div>
             <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">VPS Panel</p>
 
             <p className="mt-1 text-lg font-semibold">{snapshot.System.hostname}</p>
           </div>
+
           <button
             type="button"
             aria-label="Close navigation"
@@ -141,9 +134,10 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
 
         {/* NAVIGATION PILLS */}
 
-        <nav className="space-y-3">
+        <nav className="space-y-3 px-4">
           {navigation.map((item) => {
             const active = view === item.id;
+
             return (
               <button
                 key={item.id}
@@ -196,7 +190,9 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
 
               <span className="text-zinc-700">•</span>
 
-              <span>{lastUpdated.toLocaleTimeString()}</span>
+              <span suppressHydrationWarning>
+                {lastUpdated ? lastUpdated.toLocaleTimeString() : "—"}
+              </span>
             </div>
           </div>
         </header>
@@ -226,33 +222,39 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
 
               {/* PROCESSES */}
 
-              <div
-                role="button"
-                tabIndex={0}
+              <button
+                type="button"
                 onClick={() => changeView("processes")}
-                className="cursor-pointer rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80"
+                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80 active:scale-[0.99]"
+                style={{
+                  WebkitTapHighlightColor: "transparent",
+                  touchAction: "manipulation",
+                }}
               >
                 <p className="text-sm text-zinc-500">Processes</p>
 
                 <p className="mt-3 text-3xl font-semibold">{snapshot.Processes.length}</p>
 
                 <p className="mt-2 text-xs text-zinc-600">View processes →</p>
-              </div>
+              </button>
 
               {/* SERVICES */}
 
-              <div
-                role="button"
-                tabIndex={0}
+              <button
+                type="button"
                 onClick={() => changeView("services")}
-                className="cursor-pointer rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80"
+                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80 active:scale-[0.99]"
+                style={{
+                  WebkitTapHighlightColor: "transparent",
+                  touchAction: "manipulation",
+                }}
               >
                 <p className="text-sm text-zinc-500">Services</p>
 
                 <p className="mt-3 text-3xl font-semibold">{snapshot.Services.length}</p>
 
                 <p className="mt-2 text-xs text-zinc-600">View services →</p>
-              </div>
+              </button>
             </section>
 
             {/* SYSTEM SUMMARY */}
