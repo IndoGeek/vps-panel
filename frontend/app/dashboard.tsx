@@ -7,7 +7,15 @@ type Snapshot = Awaited<ReturnType<typeof getSnapshot>>;
 
 type View = "dashboard" | "processes" | "sessions" | "services" | "system";
 
-export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapshot }) {
+import { logout, type UserInfo } from "@/lib/api";
+
+export default function Dashboard({
+  initialSnapshot,
+  user,
+}: {
+  initialSnapshot: Snapshot;
+  user: UserInfo;
+}) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
 
   // Keep the initial server/client render identical.
@@ -119,6 +127,10 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
             <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">VPS Panel</p>
 
             <p className="mt-1 text-lg font-semibold">{snapshot.System.hostname}</p>
+
+            <p className="mt-2 text-xs text-zinc-500">
+              {user.username} · UID {user.uid}
+            </p>
           </div>
 
           <button
@@ -159,6 +171,23 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
             );
           })}
         </nav>
+
+        <div className="px-4 pb-6 pt-8">
+          <button
+            type="button"
+            onClick={async () => {
+              await logout();
+              window.location.reload();
+            }}
+            className="flex min-h-12 w-full items-center rounded-full bg-zinc-800 px-[18px] text-left text-sm font-medium text-zinc-300 transition hover:bg-zinc-700 active:scale-[0.98]"
+            style={{
+              WebkitTapHighlightColor: "transparent",
+              touchAction: "manipulation",
+            }}
+          >
+            Sign out
+          </button>
+        </div>
       </aside>
 
       {/* ========================================================= */}
@@ -178,7 +207,6 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
               <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
                 {snapshot.System.hostname}
               </h1>
-
               <p className="mt-2 text-sm text-zinc-400">
                 {snapshot.System.os} · {snapshot.System.architecture}
               </p>

@@ -68,3 +68,38 @@ export async function getSnapshot(): Promise<Snapshot> {
 
   return response.json();
 }
+
+export type MeResponse = {
+  authenticated: boolean;
+  user: UserInfo;
+};
+
+export async function getMe(): Promise<MeResponse> {
+  const response = await fetch("/api/v1/me", {
+    credentials: "include",
+  });
+
+  if (response.status === 401) {
+    return {
+      authenticated: false,
+      user: {} as UserInfo,
+    };
+  }
+
+  if (!response.ok) {
+    throw new Error(`Authentication check failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function logout(): Promise<void> {
+  const response = await fetch("/api/v1/auth/logout", {
+    method: "POST",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Logout failed: ${response.status}`);
+  }
+}
