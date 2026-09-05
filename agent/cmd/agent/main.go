@@ -2,19 +2,32 @@ package main
 
 import (
 	"fmt"
-	"os/user"
+	"log"
+
+	"github.com/tanmay/vps-panel/agent/internal/identity"
 )
 
 func main() {
-	currentUser, err := user.Current()
+	fmt.Println("VPS Panel Agent")
+	fmt.Println("================")
+	fmt.Println()
+
+	users, err := identity.ListInteractiveUsers()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
-	fmt.Println("VPS Panel Agent")
-	fmt.Println("----------------")
-	fmt.Printf("Username: %s\n", currentUser.Username)
-	fmt.Printf("UID:      %s\n", currentUser.Uid)
-	fmt.Printf("GID:      %s\n", currentUser.Gid)
-	fmt.Printf("Home:     %s\n", currentUser.HomeDir)
+	fmt.Println("Interactive Linux Users")
+	fmt.Println("-----------------------")
+
+	for _, user := range users {
+		fmt.Printf(
+			"%-12s UID=%-6d GID=%-6d HOME=%-25s SHELL=%s\n",
+			user.Username,
+			user.UID,
+			user.GID,
+			user.HomeDir,
+			user.Shell,
+		)
+	}
 }
