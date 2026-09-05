@@ -2,7 +2,10 @@ package http
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/tanmay/vps-panel/backend/internal/agent"
 	"github.com/tanmay/vps-panel/backend/internal/auth"
@@ -144,7 +147,127 @@ func NewRouter(authService *auth.Service) http.Handler {
 		_, _ = w.Write(snapshot)
 	})
 
+	// Protected interactive tmux terminal.
+	mux.HandleFunc("/api/v1/tmux/connect", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if _, ok := authService.Current(r); !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		session := r.URL.Query().Get("name")
+
+		if session == "" {
+			http.Error(
+				w,
+				"session name is required",
+				http.StatusBadRequest,
+			)
+			return
+		}
+
+		frontendConn, err := terminalUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("frontend terminal websocket upgrade failed: %v", err)
+			return
+		}
+		defer frontendConn.Close()
+
+		agentConn, err := client.ConnectTmuxSession(session)
+		if err != nil {
+			log.Printf(
+				"failed to connect to agent tmux session %q: %v",
+				session,
+				err,
+			)
+
+			_ = frontendConn.WriteMessage(
+				websocket.TextMessage,
+				[]byte("Failed to connect to the VPS agent.\r\n"),
+			)
+
+			return
+		}
+		defer agentConn.Close()
+
+		log.Printf("terminal proxy connected: %s", session)
+
+		proxyWebSocket(frontendConn, agentConn)
+
+		log.Printf("terminal proxy disconnected: %s", session)
+	})
+
 	return mux
+}
+
+var terminalUpgrader = websocket.Upgrader{
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
+
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+
+		if origin == "" {
+			return true
+		}
+
+		return origin == "http://"+r.Host ||
+			origin == "https://"+r.Host
+	},
+}
+
+func proxyWebSocket(
+	frontendConn *websocket.Conn,
+	agentConn *websocket.Conn,
+) {
+	errors := make(chan error, 2)
+
+	// Browser -> agent.
+	go func() {
+		for {
+			messageType, payload, err := frontendConn.ReadMessage()
+			if err != nil {
+				errors <- err
+				return
+			}
+
+			if err := agentConn.WriteMessage(
+				messageType,
+				payload,
+			); err != nil {
+				errors <- err
+				return
+			}
+		}
+	}()
+
+	// Agent -> browser.
+	go func() {
+		for {
+			messageType, payload, err := agentConn.ReadMessage()
+			if err != nil {
+				errors <- err
+				return
+			}
+
+			if err := frontendConn.WriteMessage(
+				messageType,
+				payload,
+			); err != nil {
+				errors <- err
+				return
+			}
+		}
+	}()
+
+	<-errors
+
+	_ = frontendConn.Close()
+	_ = agentConn.Close()
 }
 
 func identityForLogin(username string) (identity.LinuxUser, error) {

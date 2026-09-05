@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSnapshot } from "@/lib/api";
+import { getSnapshot, logout, type UserInfo } from "@/lib/api";
 
 type Snapshot = Awaited<ReturnType<typeof getSnapshot>>;
 
 type View = "dashboard" | "processes" | "sessions" | "services" | "system";
-
-import { logout, type UserInfo } from "@/lib/api";
 
 export default function Dashboard({
   initialSnapshot,
@@ -18,8 +16,6 @@ export default function Dashboard({
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
 
-  // Keep the initial server/client render identical.
-  // The timestamp is populated after hydration.
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -27,7 +23,6 @@ export default function Dashboard({
   const [view, setView] = useState<View>("dashboard");
 
   useEffect(() => {
-    // Set the initial client-side timestamp after hydration.
     setLastUpdated(new Date());
 
     const refresh = async () => {
@@ -63,12 +58,12 @@ export default function Dashboard({
     setMenuOpen(false);
   };
 
+  const openTerminal = (sessionName: string) => {
+    window.location.href = `/terminal?session=${encodeURIComponent(sessionName)}`;
+  };
+
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* ========================================================= */}
-      {/* MENU TRIGGER                                              */}
-      {/* ========================================================= */}
-
       {!menuOpen && (
         <button
           type="button"
@@ -89,10 +84,6 @@ export default function Dashboard({
         </button>
       )}
 
-      {/* ========================================================= */}
-      {/* BACKDROP                                                  */}
-      {/* ========================================================= */}
-
       <button
         type="button"
         aria-label="Close navigation"
@@ -108,10 +99,6 @@ export default function Dashboard({
         }}
       />
 
-      {/* ========================================================= */}
-      {/* SIDE DRAWER                                               */}
-      {/* ========================================================= */}
-
       <aside
         aria-hidden={!menuOpen}
         className="fixed left-0 top-0 z-[9995] h-screen w-[290px] max-w-[85vw] overflow-y-auto rounded-r-[24px] border-r border-zinc-800 bg-zinc-900 shadow-[20px_0_60px_rgba(0,0,0,0.50)]"
@@ -120,8 +107,6 @@ export default function Dashboard({
           transition: "transform 220ms ease",
         }}
       >
-        {/* DRAWER HEADER */}
-
         <div className="flex items-center justify-between px-6 pb-8 pt-7">
           <div>
             <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">VPS Panel</p>
@@ -146,8 +131,6 @@ export default function Dashboard({
             ×
           </button>
         </div>
-
-        {/* NAVIGATION PILLS */}
 
         <nav className="space-y-3 px-4">
           {navigation.map((item) => {
@@ -190,13 +173,7 @@ export default function Dashboard({
         </div>
       </aside>
 
-      {/* ========================================================= */}
-      {/* MAIN CONTENT                                              */}
-      {/* ========================================================= */}
-
       <div className="mx-auto min-h-screen w-full max-w-7xl px-5 pb-10 pt-24 sm:px-8 sm:pt-28">
-        {/* HEADER */}
-
         <header className="mb-8">
           <p className="text-sm text-zinc-500">
             {navigation.find((item) => item.id === view)?.label}
@@ -207,6 +184,7 @@ export default function Dashboard({
               <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
                 {snapshot.System.hostname}
               </h1>
+
               <p className="mt-2 text-sm text-zinc-400">
                 {snapshot.System.os} · {snapshot.System.architecture}
               </p>
@@ -228,22 +206,14 @@ export default function Dashboard({
           </div>
         </header>
 
-        {/* ======================================================= */}
-        {/* DASHBOARD                                               */}
-        {/* ======================================================= */}
-
         {view === "dashboard" && (
           <>
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {/* USERS */}
-
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <p className="text-sm text-zinc-500">Users</p>
 
                 <p className="mt-3 text-3xl font-semibold">{snapshot.Users.length}</p>
               </div>
-
-              {/* SESSIONS */}
 
               <button
                 type="button"
@@ -255,11 +225,11 @@ export default function Dashboard({
                 }}
               >
                 <p className="text-sm text-zinc-500">Sessions</p>
+
                 <p className="mt-3 text-3xl font-semibold">{snapshot.Sessions.length}</p>
+
                 <p className="mt-2 text-xs text-zinc-600">View sessions →</p>
               </button>
-
-              {/* PROCESSES */}
 
               <button
                 type="button"
@@ -277,8 +247,6 @@ export default function Dashboard({
                 <p className="mt-2 text-xs text-zinc-600">View processes →</p>
               </button>
 
-              {/* SERVICES */}
-
               <button
                 type="button"
                 onClick={() => changeView("services")}
@@ -295,8 +263,6 @@ export default function Dashboard({
                 <p className="mt-2 text-xs text-zinc-600">View services →</p>
               </button>
             </section>
-
-            {/* SYSTEM SUMMARY */}
 
             <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
               <h2 className="text-lg font-semibold">System</h2>
@@ -333,10 +299,6 @@ export default function Dashboard({
             </section>
           </>
         )}
-
-        {/* ======================================================= */}
-        {/* PROCESSES                                               */}
-        {/* ======================================================= */}
 
         {view === "processes" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -380,10 +342,6 @@ export default function Dashboard({
           </section>
         )}
 
-        {/* ======================================================= */}
-        {/* TMUX SESSIONS                                           */}
-        {/* ======================================================= */}
-
         {view === "sessions" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
             <div className="border-b border-zinc-800 p-5 sm:p-6">
@@ -409,6 +367,7 @@ export default function Dashboard({
                   <button
                     key={session.name}
                     type="button"
+                    onClick={() => openTerminal(session.name)}
                     className="block w-full p-5 text-left transition hover:bg-zinc-800/40 active:bg-zinc-800/60"
                     style={{
                       WebkitTapHighlightColor: "transparent",
@@ -454,10 +413,6 @@ export default function Dashboard({
             )}
           </section>
         )}
-
-        {/* ======================================================= */}
-        {/* SERVICES                                                */}
-        {/* ======================================================= */}
 
         {view === "services" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -506,10 +461,6 @@ export default function Dashboard({
             </div>
           </section>
         )}
-
-        {/* ======================================================= */}
-        {/* SYSTEM                                                  */}
-        {/* ======================================================= */}
 
         {view === "system" && (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 sm:p-8">

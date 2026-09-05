@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+
+	"github.com/gorilla/websocket"
 )
 
 type Client struct {
@@ -33,4 +36,30 @@ func (c *Client) Snapshot() ([]byte, error) {
 	}
 
 	return body, nil
+}
+
+func (c *Client) ConnectTmuxSession(
+	session string,
+) (*websocket.Conn, error) {
+	parsed, err := url.Parse(c.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	parsed.Scheme = "ws"
+	parsed.Path = "/api/v1/tmux/connect"
+
+	query := parsed.Query()
+	query.Set("name", session)
+	parsed.RawQuery = query.Encode()
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		parsed.String(),
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
 }
