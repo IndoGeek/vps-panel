@@ -5,6 +5,8 @@ import (
 	"log"
 
 	"github.com/tanmay/vps-panel/agent/internal/identity"
+	"github.com/tanmay/vps-panel/agent/internal/process"
+	"github.com/tanmay/vps-panel/agent/internal/system"
 	"github.com/tanmay/vps-panel/agent/internal/tmux"
 )
 
@@ -54,4 +56,37 @@ func main() {
 			session.Attached,
 		)
 	}
+	fmt.Println()
+	fmt.Println("Processes")
+	fmt.Println("---------")
+
+	processes, err := process.ListProcesses()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, p := range processes {
+		fmt.Printf(
+			"PID=%-6d PPID=%-6d UID=%-6d STATE=%-15s COMMAND=%s\n",
+			p.PID,
+			p.PPID,
+			p.UID,
+			p.State,
+			p.Command,
+		)
+	}
+
+	fmt.Println()
+	fmt.Println("System Information")
+	fmt.Println("------------------")
+
+	info, err := system.GetInfo()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Hostname:     %s\n", info.Hostname)
+	fmt.Printf("OS:           %s\n", info.OS)
+	fmt.Printf("Architecture: %s\n", info.Architecture)
+	fmt.Printf("Kernel:       %s\n", info.Kernel)
 }
