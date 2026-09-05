@@ -15,16 +15,75 @@ function getWebSocketUrl(session: string): string {
   )}`;
 }
 
+type Modifier = "ctrl" | "alt" | "shift" | null;
+
+function applyModifier(data: string, modifier: Modifier): string {
+  if (!modifier || data.length === 0) {
+    return data;
+  }
+
+  const first = data[0];
+
+  if (modifier === "ctrl") {
+    const upper = first.toUpperCase();
+
+    if (upper >= "A" && upper <= "Z") {
+      return String.fromCharCode(upper.charCodeAt(0) - 64) + data.slice(1);
+    }
+
+    if (first === " ") {
+      return "\x00" + data.slice(1);
+    }
+
+    if (first === "[") {
+      return "\x1b" + data.slice(1);
+    }
+
+    if (first === "\\") {
+      return "\x1c" + data.slice(1);
+    }
+
+    if (first === "]") {
+      return "\x1d" + data.slice(1);
+    }
+
+    if (first === "^") {
+      return "\x1e" + data.slice(1);
+    }
+
+    if (first === "_") {
+      return "\x1f" + data.slice(1);
+    }
+
+    return data;
+  }
+
+  if (modifier === "alt") {
+    return `\x1b${data}`;
+  }
+
+  if (modifier === "shift") {
+    return first.toUpperCase() + data.slice(1);
+  }
+
+  return data;
+}
+
 export default function TerminalPage() {
   const terminalContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const terminalRef = useRef<Terminal | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const modifierRef = useRef<Modifier>(null);
 
   const [sessionName, setSessionName] = useState("");
   const [status, setStatus] = useState("Connecting...");
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 
+  const [modifier, setModifier] = useState<Modifier>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-
     const session = params.get("session");
 
     if (!session) {
@@ -57,10 +116,6 @@ export default function TerminalPage() {
 
     const connect = async () => {
       try {
-        /*
-         * Make sure the browser still has a valid panel
-         * authentication session before opening the terminal.
-         */
         const me = await getMe();
 
         if (!me.authenticated) {
@@ -78,9 +133,6 @@ export default function TerminalPage() {
           return;
         }
 
-        /*
-         * Create xterm.
-         */
         terminal = new Terminal({
           cursorBlink: true,
           convertEol: false,
@@ -88,6 +140,8 @@ export default function TerminalPage() {
             "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
           fontSize: 14,
           scrollback: 5000,
+
+          allowProposedApi: true,
 
           theme: {
             background: "#09090b",
@@ -97,6 +151,8 @@ export default function TerminalPage() {
           },
         });
 
+        terminalRef.current = terminal;
+
         fitAddon = new FitAddon();
 
         terminal.loadAddon(fitAddon);
@@ -105,26 +161,11 @@ export default function TerminalPage() {
 
         fitAddon.fit();
 
-        /*
-         * IMPORTANT:
-         *
-         * The WebSocket now connects to the SAME host/port
-         * that served the web panel.
-         *
-         * Example:
-         *
-         * http://127.0.0.1:3000
-         *        ↓
-         * ws://127.0.0.1:3000/api/v1/tmux/connect
-         *
-         * frontend/server.mjs then proxies the WebSocket
-         * internally to:
-         *
-         * ws://127.0.0.1:8090/api/v1/tmux/connect
-         */
         const websocketUrl = getWebSocketUrl(session);
 
         socket = new WebSocket(websocketUrl);
+
+        socketRef.current = socket;
 
         socket.binaryType = "arraybuffer";
 
@@ -154,7 +195,6 @@ export default function TerminalPage() {
 
           if (event.data instanceof ArrayBuffer) {
             terminal.write(new Uint8Array(event.data));
-
             return;
           }
 
@@ -194,19 +234,23 @@ export default function TerminalPage() {
           terminal?.write("\r\n\x1b[33mTerminal connection closed.\x1b[0m\r\n");
         };
 
-        /*
-         * Keyboard input -> WebSocket -> backend -> tmux.
-         */
         terminal.onData((data) => {
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(data);
+          if (!socket || socket.readyState !== WebSocket.OPEN) {
+            return;
+          }
+
+          const activeModifier = modifierRef.current;
+
+          const output = applyModifier(data, activeModifier);
+
+          socket.send(output);
+
+          if (activeModifier !== null) {
+            modifierRef.current = null;
+            setModifier(null);
           }
         });
 
-        /*
-         * Resize terminal when the browser/device changes
-         * dimensions.
-         */
         const handleResize = () => {
           fitAddon?.fit();
 
@@ -239,8 +283,56 @@ export default function TerminalPage() {
       terminal?.dispose();
 
       fitAddon?.dispose();
+
+      socketRef.current = null;
+      terminalRef.current = null;
     };
   }, []);
+
+  const toggleModifier = (nextModifier: Modifier) => {
+    if (modifierRef.current === nextModifier) {
+      modifierRef.current = null;
+      setModifier(null);
+      return;
+    }
+
+    modifierRef.current = nextModifier;
+    setModifier(nextModifier);
+    terminalRef.current?.focus();
+  };
+
+  const sendSpecialKey = (value: string) => {
+    const socket = socketRef.current;
+
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    socket.send(value);
+
+    terminalRef.current?.focus();
+  };
+
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+
+      if (!text) {
+        terminalRef.current?.focus();
+        return;
+      }
+
+      const socket = socketRef.current;
+
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(text);
+      }
+    } catch (error) {
+      console.error("Unable to read clipboard:", error);
+    }
+
+    terminalRef.current?.focus();
+  };
 
   if (authenticated === false) {
     return null;
@@ -253,10 +345,16 @@ export default function TerminalPage() {
           <button
             type="button"
             onClick={() => {
-              window.location.href = "/";
+              /*
+               * The terminal was opened from the Sessions view.
+               * Going back through browser history returns to
+               * that exact Sessions state instead of resetting
+               * the dashboard to its default view.
+               */
+              window.history.back();
             }}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-zinc-300 transition hover:bg-zinc-700 hover:text-white"
-            aria-label="Back to dashboard"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-zinc-300 transition hover:bg-zinc-700 hover:text-white active:scale-95"
+            aria-label="Back to sessions"
           >
             ←
           </button>
@@ -285,10 +383,72 @@ export default function TerminalPage() {
         </div>
       </header>
 
+      <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-zinc-800 bg-zinc-900 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => {
+            void pasteFromClipboard();
+          }}
+          className="shrink-0 rounded-full border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-95"
+        >
+          Paste
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleModifier("ctrl")}
+          className={`shrink-0 rounded-full border px-4 py-2 text-xs font-medium transition active:scale-95 ${
+            modifier === "ctrl"
+              ? "border-zinc-200 bg-zinc-100 text-zinc-900"
+              : "border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+          }`}
+          aria-pressed={modifier === "ctrl"}
+        >
+          Ctrl
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleModifier("alt")}
+          className={`shrink-0 rounded-full border px-4 py-2 text-xs font-medium transition active:scale-95 ${
+            modifier === "alt"
+              ? "border-zinc-200 bg-zinc-100 text-zinc-900"
+              : "border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+          }`}
+          aria-pressed={modifier === "alt"}
+        >
+          Alt
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleModifier("shift")}
+          className={`shrink-0 rounded-full border px-4 py-2 text-xs font-medium transition active:scale-95 ${
+            modifier === "shift"
+              ? "border-zinc-200 bg-zinc-100 text-zinc-900"
+              : "border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+          }`}
+          aria-pressed={modifier === "shift"}
+        >
+          Shift
+        </button>
+
+        <button
+          type="button"
+          onClick={() => sendSpecialKey("\t")}
+          className="shrink-0 rounded-full border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 active:scale-95"
+        >
+          Tab
+        </button>
+      </div>
+
       <section className="min-h-0 flex-1 p-2 sm:p-3">
         <div
           ref={terminalContainerRef}
           className="h-full w-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-2"
+          onClick={() => {
+            terminalRef.current?.focus();
+          }}
         />
       </section>
     </main>
