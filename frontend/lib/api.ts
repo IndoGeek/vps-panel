@@ -57,7 +57,10 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 export async function getSnapshot(): Promise<Snapshot> {
-  const response = await fetch("/api/v1/snapshot");
+  const baseUrl =
+    typeof window === "undefined" ? (process.env.BACKEND_API_URL ?? "http://127.0.0.1:8090") : "";
+
+  const response = await fetch(`${baseUrl}/api/v1/snapshot`);
 
   if (!response.ok) {
     throw new Error(`Snapshot request failed: ${response.status}`);
