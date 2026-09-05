@@ -66,4 +66,22 @@ func ListSessions() ([]Session, error) {
 	}
 
 	return sessions, nil
+
+	func HasSession(name string) bool {
+	   if name == "" {
+			  return false
+	   }
+
+		 session, err := ListSessions()
+	   if err != nil {
+			  return false
+		 }
+
+		for _, session := range sessions {
+				if session.Name == name {
+					return true
+				}
+		}
+ 		return false
+	}
 }

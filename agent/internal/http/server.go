@@ -22,6 +22,7 @@ func (s *Server) ListenAndServe() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/v1/snapshot", s.handleSnapshot)
+	mux.HandleFunc("/api/v1/tmux/session", s.handleTmuxSession)
 	mux.HandleFunc("/api/health", s.handleHealth)
 
 	log.Printf("VPS Panel agent API starting on %s", s.addr)
@@ -60,4 +61,30 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(snapshot); err != nil {
 		log.Printf("failed to encode snapshot: %v", err)
 	}
+}
+
+func (s *Server) handleTmuxSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session := r.URL.Query().Get("name")
+
+	if session == "" {
+		http.Error(w, "session name is required", http.StatusBadRequest)
+		return
+	}
+
+	if !agentcore.HasTmuxSession(session) {
+		http.Error(w, "tmux session not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"session":   session,
+		"available": true,
+	})
 }
