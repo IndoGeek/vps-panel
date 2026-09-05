@@ -49,79 +49,209 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* Navigation trigger */}
-      <button
-        type="button"
+      {/* ========================================================= */}
+      {/* MENU TRIGGER                                              */}
+      {/* ========================================================= */}
+
+      <div
+        role="button"
+        tabIndex={0}
         aria-label="Open navigation"
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen(true)}
-        onPointerUp={() => setMenuOpen(true)}
-        className="fixed left-4 top-4 z-[100] flex h-12 w-12 touch-manipulation items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 text-zinc-300 shadow-xl transition active:scale-95 hover:bg-zinc-800"
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setMenuOpen(true);
+          }
+        }}
+        style={{
+          position: "fixed",
+          top: "18px",
+          left: "18px",
+          width: "50px",
+          height: "50px",
+          zIndex: 10000,
+          borderRadius: "9999px",
+          border: "1px solid rgb(39, 39, 42)",
+          background: "rgb(24, 24, 27)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+          WebkitTapHighlightColor: "transparent",
+          touchAction: "manipulation",
+          boxShadow: "0 10px 30px rgba(0, 0, 0, 0.35)",
+        }}
       >
-        <span className="flex gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-zinc-300" />
-          <span className="h-1.5 w-1.5 rounded-full bg-zinc-300" />
-          <span className="h-1.5 w-1.5 rounded-full bg-zinc-300" />
-        </span>
-      </button>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "4px",
+          }}
+        >
+          <span
+            style={{
+              width: "5px",
+              height: "5px",
+              borderRadius: "50%",
+              background: "#d4d4d8",
+            }}
+          />
+          <span
+            style={{
+              width: "5px",
+              height: "5px",
+              borderRadius: "50%",
+              background: "#d4d4d8",
+            }}
+          />
+          <span
+            style={{
+              width: "5px",
+              height: "5px",
+              borderRadius: "50%",
+              background: "#d4d4d8",
+            }}
+          />
+        </div>
+      </div>
 
-      {/* Navigation drawer */}
-      {menuOpen && (
-        <>
-          <button
-            type="button"
+      {/* ========================================================= */}
+      {/* BACKDROP                                                  */}
+      {/* ========================================================= */}
+
+      <div
+        onClick={() => setMenuOpen(false)}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 9990,
+          background: "rgba(0, 0, 0, 0.60)",
+          opacity: menuOpen ? 1 : 0,
+          pointerEvents: menuOpen ? "auto" : "none",
+          transition: "opacity 180ms ease",
+        }}
+      />
+
+      {/* ========================================================= */}
+      {/* SIDE DRAWER                                               */}
+      {/* ========================================================= */}
+
+      <aside
+        aria-hidden={!menuOpen}
+        style={{
+          position: "fixed",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: "290px",
+          maxWidth: "85vw",
+          zIndex: 9995,
+          padding: "24px 16px",
+          background: "rgb(24, 24, 27)",
+          borderRight: "1px solid rgb(39, 39, 42)",
+          borderRadius: "0 24px 24px 0",
+          boxShadow: "20px 0 60px rgba(0, 0, 0, 0.50)",
+          transform: menuOpen ? "translateX(0)" : "translateX(-105%)",
+          transition: "transform 220ms ease",
+          overflowY: "auto",
+        }}
+      >
+        {/* DRAWER HEADER */}
+
+        <div className="mb-8 flex items-center justify-between px-2">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">VPS Panel</p>
+
+            <p className="mt-1 text-lg font-semibold">{snapshot.System.hostname}</p>
+          </div>
+
+          <div
+            role="button"
+            tabIndex={0}
             aria-label="Close navigation"
             onClick={() => setMenuOpen(false)}
-            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]"
-          />
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setMenuOpen(false);
+              }
+            }}
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "9999px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              color: "#a1a1aa",
+              fontSize: "24px",
+              userSelect: "none",
+              WebkitTapHighlightColor: "transparent",
+              touchAction: "manipulation",
+            }}
+          >
+            ×
+          </div>
+        </div>
 
-          <aside className="fixed left-3 top-3 z-50 w-[280px] rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-2xl">
-            <div className="mb-5 flex items-center justify-between px-2">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">
-                  VPS Panel
-                </p>
+        {/* NAVIGATION PILLS */}
 
-                <p className="mt-1 text-lg font-semibold">{snapshot.System.hostname}</p>
-              </div>
+        <nav className="space-y-3">
+          {navigation.map((item) => {
+            const active = view === item.id;
 
-              <button
-                type="button"
-                onClick={() => setMenuOpen(false)}
-                aria-label="Close navigation"
-                className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+            return (
+              <div
+                key={item.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => changeView(item.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    changeView(item.id);
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  minHeight: "48px",
+                  borderRadius: "9999px",
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "0 18px",
+                  cursor: "pointer",
+                  userSelect: "none",
+                  WebkitUserSelect: "none",
+                  WebkitTapHighlightColor: "transparent",
+                  touchAction: "manipulation",
+                  background: active ? "rgb(244, 244, 245)" : "rgb(39, 39, 42)",
+                  color: active ? "rgb(24, 24, 27)" : "rgb(212, 212, 216)",
+                  fontSize: "14px",
+                  fontWeight: 500,
+                  transition: "background 150ms ease, color 150ms ease",
+                }}
               >
-                ×
-              </button>
-            </div>
+                {item.label}
+              </div>
+            );
+          })}
+        </nav>
+      </aside>
 
-            <nav className="space-y-2">
-              {navigation.map((item) => {
-                const active = view === item.id;
+      {/* ========================================================= */}
+      {/* MAIN CONTENT                                              */}
+      {/* ========================================================= */}
 
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => changeView(item.id)}
-                    className={`flex w-full items-center rounded-xl px-4 py-3 text-left text-sm font-medium transition ${
-                      active
-                        ? "bg-zinc-100 text-zinc-950"
-                        : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </nav>
-          </aside>
-        </>
-      )}
+      <div className="mx-auto min-h-screen w-full max-w-7xl px-5 pb-10 pt-24 sm:px-8 sm:pt-28">
+        {/* HEADER */}
 
-      {/* Main content */}
-      <div className="mx-auto min-h-screen w-full max-w-7xl px-5 pb-10 pt-20 sm:px-8 sm:pt-24">
-        {/* Header */}
         <header className="mb-8">
           <p className="text-sm text-zinc-500">
             {navigation.find((item) => item.id === view)?.label}
@@ -152,61 +282,71 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
           </div>
         </header>
 
-        {/* Dashboard */}
+        {/* ======================================================= */}
+        {/* DASHBOARD                                               */}
+        {/* ======================================================= */}
+
         {view === "dashboard" && (
           <>
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <button
-                type="button"
-                onClick={() => changeView("dashboard")}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80"
-              >
+              {/* USERS */}
+
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <p className="text-sm text-zinc-500">Users</p>
+
                 <p className="mt-3 text-3xl font-semibold">{snapshot.Users.length}</p>
-              </button>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => changeView("dashboard")}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80"
-              >
+              {/* SESSIONS */}
+
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <p className="text-sm text-zinc-500">Sessions</p>
-                <p className="mt-3 text-3xl font-semibold">{snapshot.Sessions.length}</p>
-              </button>
 
-              <button
-                type="button"
+                <p className="mt-3 text-3xl font-semibold">{snapshot.Sessions.length}</p>
+              </div>
+
+              {/* PROCESSES */}
+
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => changeView("processes")}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80"
+                className="cursor-pointer rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80"
               >
                 <p className="text-sm text-zinc-500">Processes</p>
+
                 <p className="mt-3 text-3xl font-semibold">{snapshot.Processes.length}</p>
 
                 <p className="mt-2 text-xs text-zinc-600">View processes →</p>
-              </button>
+              </div>
 
-              <button
-                type="button"
+              {/* SERVICES */}
+
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => changeView("services")}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80"
+                className="cursor-pointer rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80"
               >
                 <p className="text-sm text-zinc-500">Services</p>
+
                 <p className="mt-3 text-3xl font-semibold">{snapshot.Services.length}</p>
 
                 <p className="mt-2 text-xs text-zinc-600">View services →</p>
-              </button>
+              </div>
             </section>
 
-            <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-lg font-semibold">System</h2>
+            {/* SYSTEM SUMMARY */}
 
-                <p className="text-sm text-zinc-500">Server information</p>
-              </div>
+            <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+              <h2 className="text-lg font-semibold">System</h2>
+
+              <p className="mt-1 text-sm text-zinc-500">Server information</p>
 
               <dl className="mt-6 grid gap-6 sm:grid-cols-2">
                 <div>
                   <dt className="text-xs uppercase tracking-wide text-zinc-500">Hostname</dt>
+
                   <dd className="mt-2 text-sm">{snapshot.System.hostname}</dd>
                 </div>
 
@@ -214,16 +354,19 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
                   <dt className="text-xs uppercase tracking-wide text-zinc-500">
                     Operating system
                   </dt>
+
                   <dd className="mt-2 text-sm">{snapshot.System.os}</dd>
                 </div>
 
                 <div>
                   <dt className="text-xs uppercase tracking-wide text-zinc-500">Architecture</dt>
+
                   <dd className="mt-2 text-sm">{snapshot.System.architecture}</dd>
                 </div>
 
                 <div>
                   <dt className="text-xs uppercase tracking-wide text-zinc-500">Kernel</dt>
+
                   <dd className="mt-2 text-sm">{snapshot.System.kernel}</dd>
                 </div>
               </dl>
@@ -231,7 +374,10 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
           </>
         )}
 
-        {/* Processes */}
+        {/* ======================================================= */}
+        {/* PROCESSES                                               */}
+        {/* ======================================================= */}
+
         {view === "processes" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
             <div className="border-b border-zinc-800 p-5 sm:p-6">
@@ -274,7 +420,10 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
           </section>
         )}
 
-        {/* Services */}
+        {/* ======================================================= */}
+        {/* SERVICES                                                */}
+        {/* ======================================================= */}
+
         {view === "services" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
             <div className="border-b border-zinc-800 p-5 sm:p-6">
@@ -323,33 +472,38 @@ export default function Dashboard({ initialSnapshot }: { initialSnapshot: Snapsh
           </section>
         )}
 
-        {/* System */}
+        {/* ======================================================= */}
+        {/* SYSTEM                                                  */}
+        {/* ======================================================= */}
+
         {view === "system" && (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
-            <div>
-              <h2 className="text-lg font-semibold">System</h2>
+            <h2 className="text-lg font-semibold">System</h2>
 
-              <p className="mt-1 text-sm text-zinc-500">Detailed server information</p>
-            </div>
+            <p className="mt-1 text-sm text-zinc-500">Detailed server information</p>
 
             <dl className="mt-8 grid gap-7 sm:grid-cols-2">
               <div>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Hostname</dt>
+
                 <dd className="mt-2 text-sm">{snapshot.System.hostname}</dd>
               </div>
 
               <div>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Operating system</dt>
+
                 <dd className="mt-2 text-sm">{snapshot.System.os}</dd>
               </div>
 
               <div>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Architecture</dt>
+
                 <dd className="mt-2 text-sm">{snapshot.System.architecture}</dd>
               </div>
 
               <div>
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Kernel</dt>
+
                 <dd className="mt-2 text-sm">{snapshot.System.kernel}</dd>
               </div>
             </dl>
