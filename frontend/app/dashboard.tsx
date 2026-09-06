@@ -1,26 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+
 import { getAuditLogs, getSnapshot, logout, type AuditEntry, type UserInfo } from "@/lib/api";
 
 import SessionManagement from "@/app/components/SessionManagement";
-import SystemManagement from "@/app/components/SystemManagement";
+
+import SystemManagement, {
+  SystemPowerControls,
+  SystemResourceGrid,
+} from "@/app/components/SystemManagement";
 
 type Snapshot = Awaited<ReturnType<typeof getSnapshot>>;
 
 type View = "dashboard" | "processes" | "sessions" | "services" | "system" | "audit";
-
-type MetricHistory = {
-  cpu: number[];
-  memory: number[];
-  disk: number[];
-};
-
-const HISTORY_LENGTH = 30;
-
-function clamp(value: number, minimum = 0, maximum = 100) {
-  return Math.min(maximum, Math.max(minimum, value));
-}
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 0) {
@@ -42,197 +35,6 @@ function formatBytes(bytes: number) {
   }
 
   return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unit]}`;
-}
-
-function formatUptime(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds < 0) {
-    return "—";
-  }
-
-  const totalMinutes = Math.floor(seconds / 60);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-
-  if (days > 0) {
-    return `${days}d ${hours}h ${minutes}m`;
-  }
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-
-  return `${minutes}m`;
-}
-
-function formatPercent(value: number) {
-  if (!Number.isFinite(value)) {
-    return "0%";
-  }
-
-  return `${Math.round(value)}%`;
-}
-
-function buildSparklinePoints(values: number[], width = 320, height = 72) {
-  if (values.length === 0) {
-    return "";
-  }
-
-  if (values.length === 1) {
-    const y = height - (clamp(values[0]) / 100) * height;
-
-    return `0,${y} ${width},${y}`;
-  }
-
-  return values
-    .map((value, index) => {
-      const x = (index / (values.length - 1)) * width;
-      const y = height - (clamp(value) / 100) * height;
-
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(" ");
-}
-
-function Sparkline({ values, label }: { values: number[]; label: string }) {
-  const points = buildSparklinePoints(values);
-
-  return (
-    <div
-      className="relative mt-5 h-[82px] overflow-hidden rounded-xl bg-zinc-950/70"
-      aria-label={`${label} usage history`}
-    >
-      <svg
-        viewBox="0 0 320 72"
-        preserveAspectRatio="none"
-        className="absolute inset-x-0 bottom-0 h-[72px] w-full"
-      >
-        <line
-          x1="0"
-          y1="18"
-          x2="320"
-          y2="18"
-          stroke="currentColor"
-          strokeWidth="1"
-          className="text-zinc-800"
-        />
-
-        <line
-          x1="0"
-          y1="36"
-          x2="320"
-          y2="36"
-          stroke="currentColor"
-          strokeWidth="1"
-          className="text-zinc-800"
-        />
-
-        <line
-          x1="0"
-          y1="54"
-          x2="320"
-          y2="54"
-          stroke="currentColor"
-          strokeWidth="1"
-          className="text-zinc-800"
-        />
-
-        {points && (
-          <polyline
-            points={points}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="text-zinc-300"
-          />
-        )}
-      </svg>
-    </div>
-  );
-}
-
-function MetricCard({
-  title,
-  value,
-  subtitle,
-  values,
-  icon,
-}: {
-  title: string;
-  value: string;
-  subtitle: string;
-  values: number[];
-  icon: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-zinc-500">{title}</p>
-
-          <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
-
-          <p className="mt-2 text-xs text-zinc-500">{subtitle}</p>
-        </div>
-
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-          {icon}
-        </div>
-      </div>
-
-      <Sparkline values={values} label={title} />
-    </section>
-  );
-}
-
-function CpuIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <rect x="5" y="5" width="14" height="14" rx="2" />
-      <path d="M9 9h6v6H9z" />
-      <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
-    </svg>
-  );
-}
-
-function MemoryIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <rect x="3" y="6" width="18" height="12" rx="2" />
-      <path d="M7 9v6M11 9v6M15 9v6M19 9v6" />
-      <path d="M3 10H1M3 14H1M23 10h-2M23 14h-2" />
-    </svg>
-  );
-}
-
-function DiskIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <rect x="4" y="3" width="16" height="18" rx="2" />
-      <path d="M8 3v5h8V3M8 17h8" />
-      <circle cx="12" cy="14" r="1.5" />
-    </svg>
-  );
 }
 
 function ActivityIcon() {
@@ -353,6 +155,28 @@ function ServiceIcon({ name }: { name: string }) {
   );
 }
 
+function DashboardActionButton({
+  children,
+  onClick,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="shrink-0 rounded-full bg-zinc-100 px-4 py-2.5 text-xs font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.98]"
+      style={{
+        WebkitTapHighlightColor: "transparent",
+        touchAction: "manipulation",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function Dashboard({
   initialSnapshot,
   user,
@@ -365,24 +189,28 @@ export default function Dashboard({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const [refreshing, setRefreshing] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [view, setView] = useState<View>("dashboard");
-  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
-  const [auditTotal, setAuditTotal] = useState(0);
-  const [auditOffset, setAuditOffset] = useState(0);
-  const [auditLoading, setAuditLoading] = useState(false);
-  const [auditError, setAuditError] = useState("");
-  const [auditAction, setAuditAction] = useState("");
-  const [auditStatus, setAuditStatus] = useState("");
 
-  const [history, setHistory] = useState<MetricHistory>(() => ({
-    cpu: [initialSnapshot.Metrics.cpu_percent],
-    memory: [initialSnapshot.Metrics.memory_percent],
-    disk: [initialSnapshot.Metrics.disk_percent],
-  }));
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const [view, setView] = useState<View>("dashboard");
+
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+
+  const [auditTotal, setAuditTotal] = useState(0);
+
+  const [auditOffset, setAuditOffset] = useState(0);
+
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  const [auditError, setAuditError] = useState("");
+
+  const [auditAction, setAuditAction] = useState("");
+
+  const [auditStatus, setAuditStatus] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
     const requestedView = params.get("view");
 
     if (
@@ -397,6 +225,13 @@ export default function Dashboard({
     }
   }, []);
 
+  /*
+   * Keep the existing live snapshot refresh.
+   *
+   * The old dashboard metric-history/sparkline state has deliberately been
+   * removed. The Dashboard now renders the same live resource cards used by
+   * SystemManagement.
+   */
   useEffect(() => {
     setLastUpdated(new Date());
 
@@ -408,14 +243,6 @@ export default function Dashboard({
 
         setSnapshot(nextSnapshot);
         setLastUpdated(new Date());
-
-        setHistory((previous) => ({
-          cpu: [...previous.cpu, nextSnapshot.Metrics.cpu_percent].slice(-HISTORY_LENGTH),
-
-          memory: [...previous.memory, nextSnapshot.Metrics.memory_percent].slice(-HISTORY_LENGTH),
-
-          disk: [...previous.disk, nextSnapshot.Metrics.disk_percent].slice(-HISTORY_LENGTH),
-        }));
       } catch (error) {
         console.error("Failed to refresh VPS snapshot:", error);
       } finally {
@@ -495,7 +322,6 @@ export default function Dashboard({
         });
 
         setAuditEntries(result.entries);
-
         setAuditTotal(result.total);
       } catch (error) {
         console.error("Failed to refresh audit logs:", error);
@@ -505,13 +331,34 @@ export default function Dashboard({
     return () => clearInterval(interval);
   }, [view, auditOffset, auditAction, auditStatus]);
 
-  const navigation: { id: View; label: string }[] = [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "processes", label: "Processes" },
-    { id: "sessions", label: "Sessions" },
-    { id: "services", label: "Services" },
-    { id: "system", label: "System" },
-    { id: "audit", label: "Audit" },
+  const navigation: {
+    id: View;
+    label: string;
+  }[] = [
+    {
+      id: "dashboard",
+      label: "Dashboard",
+    },
+    {
+      id: "processes",
+      label: "Processes",
+    },
+    {
+      id: "sessions",
+      label: "Sessions",
+    },
+    {
+      id: "services",
+      label: "Services",
+    },
+    {
+      id: "system",
+      label: "System",
+    },
+    {
+      id: "audit",
+      label: "Audit",
+    },
   ];
 
   const changeView = (nextView: View) => {
@@ -684,162 +531,121 @@ export default function Dashboard({
 
         {view === "dashboard" && (
           <>
-            <section className="grid gap-4 sm:grid-cols-2">
-              <MetricCard
-                title="CPU"
-                value={formatPercent(snapshot.Metrics.cpu_percent)}
-                subtitle={`${snapshot.Metrics.load_1.toFixed(2)} load average`}
-                values={history.cpu}
-                icon={<CpuIcon />}
-              />
+            {/* ------------------------------------------------------------
+             * Current VPS resource utilization
+             * ------------------------------------------------------------ */}
 
-              <MetricCard
-                title="Memory"
-                value={formatPercent(snapshot.Metrics.memory_percent)}
-                subtitle={`${formatBytes(snapshot.Metrics.memory_used_bytes)} of ${formatBytes(snapshot.Metrics.memory_total_bytes)}`}
-                values={history.memory}
-                icon={<MemoryIcon />}
-              />
+            <SystemResourceGrid snapshot={snapshot} />
 
-              <MetricCard
-                title="Disk"
-                value={formatPercent(snapshot.Metrics.disk_percent)}
-                subtitle={`${formatBytes(snapshot.Metrics.disk_used_bytes)} of ${formatBytes(snapshot.Metrics.disk_total_bytes)}`}
-                values={history.disk}
-                icon={<DiskIcon />}
-              />
+            {/* ------------------------------------------------------------
+             * Power controls
+             * ------------------------------------------------------------ */}
 
-              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+            <div className="mt-6">
+              <SystemPowerControls />
+            </div>
+
+            {/* ------------------------------------------------------------
+             * Quick management cards
+             * ------------------------------------------------------------ */}
+
+            <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {/* Services */}
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm text-zinc-500">Services</p>
+
+                    <p className="mt-3 text-3xl font-semibold">{snapshot.Services.length}</p>
+
+                    <span className="mt-3 inline-flex rounded-full bg-green-400/10 px-2.5 py-1 text-xs text-green-400">
+                      {activeServices} active
+                    </span>
+                  </div>
+
+                  <DashboardActionButton onClick={() => changeView("services")}>
+                    View services →
+                  </DashboardActionButton>
+                </div>
+              </section>
+
+              {/* Processes */}
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm text-zinc-500">Processes</p>
+
+                    <p className="mt-3 text-3xl font-semibold">{snapshot.Processes.length}</p>
+                  </div>
+
+                  <DashboardActionButton onClick={() => changeView("processes")}>
+                    View processes →
+                  </DashboardActionButton>
+                </div>
+              </section>
+
+              {/* Tmux */}
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm text-zinc-500">Tmux Sessions</p>
+
+                    <p className="mt-3 text-3xl font-semibold">{snapshot.Sessions.length}</p>
+                  </div>
+
+                  <DashboardActionButton onClick={() => changeView("sessions")}>
+                    Open terminal →
+                  </DashboardActionButton>
+                </div>
+              </section>
+
+              {/* Network */}
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-sm text-zinc-500">System Load</p>
+                    <p className="text-sm text-zinc-500">Network</p>
 
-                    <p className="mt-3 text-3xl font-semibold tracking-tight">
-                      {snapshot.Metrics.load_1.toFixed(2)}
-                    </p>
+                    <div className="mt-4 space-y-3">
+                      <div>
+                        <p className="text-xs text-zinc-600">Received</p>
 
-                    <p className="mt-2 text-xs text-zinc-500">
-                      {snapshot.Metrics.load_5.toFixed(2)} · {snapshot.Metrics.load_15.toFixed(2)}{" "}
-                      over 5m / 15m
-                    </p>
-                  </div>
+                        <p className="mt-1 text-sm font-medium">
+                          {formatBytes(snapshot.Metrics.network_rx_bytes)}
+                        </p>
+                      </div>
 
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-                    <ActivityIcon />
-                  </div>
-                </div>
+                      <div>
+                        <p className="text-xs text-zinc-600">Transmitted</p>
 
-                <div className="mt-5 grid grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-zinc-950/70 p-3">
-                    <p className="text-xs text-zinc-600">Uptime</p>
-                    <p className="mt-1 text-sm font-medium">
-                      {formatUptime(snapshot.Metrics.uptime_seconds)}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-zinc-950/70 p-3">
-                    <p className="text-xs text-zinc-600">Swap</p>
-                    <p className="mt-1 text-sm font-medium">
-                      {formatPercent(snapshot.Metrics.swap_percent)}
-                    </p>
+                        <p className="mt-1 text-sm font-medium">
+                          {formatBytes(snapshot.Metrics.network_tx_bytes)}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </section>
             </section>
 
-            <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <button
-                type="button"
-                onClick={() => changeView("services")}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80 active:scale-[0.99]"
-                style={{
-                  WebkitTapHighlightColor: "transparent",
-                  touchAction: "manipulation",
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-zinc-500">Services</p>
-
-                  <span className="rounded-full bg-green-400/10 px-2.5 py-1 text-xs text-green-400">
-                    {activeServices} active
-                  </span>
-                </div>
-
-                <p className="mt-3 text-3xl font-semibold">{snapshot.Services.length}</p>
-
-                <p className="mt-2 text-xs text-zinc-600">View services →</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => changeView("processes")}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80 active:scale-[0.99]"
-                style={{
-                  WebkitTapHighlightColor: "transparent",
-                  touchAction: "manipulation",
-                }}
-              >
-                <p className="text-sm text-zinc-500">Processes</p>
-
-                <p className="mt-3 text-3xl font-semibold">{snapshot.Processes.length}</p>
-
-                <p className="mt-2 text-xs text-zinc-600">View processes →</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => changeView("sessions")}
-                className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80 active:scale-[0.99]"
-                style={{
-                  WebkitTapHighlightColor: "transparent",
-                  touchAction: "manipulation",
-                }}
-              >
-                <p className="text-sm text-zinc-500">Tmux Sessions</p>
-
-                <p className="mt-3 text-3xl font-semibold">{snapshot.Sessions.length}</p>
-
-                <p className="mt-2 text-xs text-zinc-600">Open terminal →</p>
-              </button>
-
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <p className="text-sm text-zinc-500">Network</p>
-
-                <div className="mt-4 space-y-3">
-                  <div>
-                    <p className="text-xs text-zinc-600">Received</p>
-
-                    <p className="mt-1 text-sm font-medium">
-                      {formatBytes(snapshot.Metrics.network_rx_bytes)}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-zinc-600">Transmitted</p>
-
-                    <p className="mt-1 text-sm font-medium">
-                      {formatBytes(snapshot.Metrics.network_tx_bytes)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </section>
+            {/* ------------------------------------------------------------
+             * Compact system information
+             * ------------------------------------------------------------ */}
 
             <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-lg font-semibold">System</h2>
 
                   <p className="mt-1 text-sm text-zinc-500">Server information</p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => changeView("system")}
-                  className="w-fit rounded-full bg-zinc-800 px-4 py-2 text-xs text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-200"
-                >
+                <DashboardActionButton onClick={() => changeView("system")}>
                   Details →
-                </button>
+                </DashboardActionButton>
               </div>
 
               <dl className="mt-6 grid gap-6 sm:grid-cols-2">
@@ -872,6 +678,10 @@ export default function Dashboard({
             </section>
           </>
         )}
+
+        {/* --------------------------------------------------------------
+         * Processes
+         * -------------------------------------------------------------- */}
 
         {view === "processes" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -915,7 +725,15 @@ export default function Dashboard({
           </section>
         )}
 
+        {/* --------------------------------------------------------------
+         * Sessions
+         * -------------------------------------------------------------- */}
+
         {view === "sessions" && <SessionManagement onOpenTerminal={openTerminal} />}
+
+        {/* --------------------------------------------------------------
+         * Services
+         * -------------------------------------------------------------- */}
 
         {view === "services" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -986,6 +804,10 @@ export default function Dashboard({
             </div>
           </section>
         )}
+
+        {/* --------------------------------------------------------------
+         * Audit
+         * -------------------------------------------------------------- */}
 
         {view === "audit" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -1153,6 +975,9 @@ export default function Dashboard({
           </section>
         )}
 
+        {/* --------------------------------------------------------------
+         * System
+         * -------------------------------------------------------------- */}
         {view === "system" && <SystemManagement snapshot={snapshot} user={user} />}
       </div>
     </main>

@@ -264,7 +264,7 @@ function ResourceCard({
   return (
     <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm text-zinc-500">{title}</p>
 
           <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
@@ -289,6 +289,97 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
       <dd className="mt-2 truncate text-sm text-zinc-200">{value || "—"}</dd>
     </div>
+  );
+}
+
+/*
+ * Shared resource cards.
+ *
+ * This is intentionally exported because the Dashboard uses the exact same
+ * resource-card UI as the dedicated System page.
+ */
+export function SystemResourceGrid({ snapshot }: { snapshot: Snapshot }) {
+  const cpu = snapshot.Metrics.cpu_percent;
+  const memory = snapshot.Metrics.memory_percent;
+  const disk = snapshot.Metrics.disk_percent;
+
+  return (
+    <section>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold">Resources</h2>
+
+        <p className="mt-1 text-sm text-zinc-500">Current VPS resource utilization</p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <ResourceCard
+          title="CPU"
+          value={formatPercent(cpu)}
+          subtitle={`${snapshot.Metrics.load_1.toFixed(2)} current load`}
+          icon={<CpuIcon />}
+          progress={cpu}
+          progressLabel="CPU utilization"
+        />
+
+        <ResourceCard
+          title="Memory"
+          value={formatPercent(memory)}
+          subtitle={`${formatBytes(
+            snapshot.Metrics.memory_used_bytes,
+          )} of ${formatBytes(snapshot.Metrics.memory_total_bytes)}`}
+          icon={<MemoryIcon />}
+          progress={memory}
+          progressLabel="Memory utilization"
+        />
+
+        <ResourceCard
+          title="Disk"
+          value={formatPercent(disk)}
+          subtitle={`${formatBytes(
+            snapshot.Metrics.disk_used_bytes,
+          )} of ${formatBytes(snapshot.Metrics.disk_total_bytes)}`}
+          icon={<DiskIcon />}
+          progress={disk}
+          progressLabel="Root filesystem"
+        />
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm text-zinc-500">System load</p>
+
+              <p className="mt-3 text-3xl font-semibold tracking-tight">
+                {snapshot.Metrics.load_1.toFixed(2)}
+              </p>
+
+              <p className="mt-2 text-xs text-zinc-500">1m / 5m / 15m load average</p>
+            </div>
+
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+              <ActivityIcon />
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-zinc-950/70 p-3">
+              <p className="text-xs text-zinc-600">Uptime</p>
+
+              <p className="mt-1 text-sm font-medium">
+                {formatUptime(snapshot.Metrics.uptime_seconds)}
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-zinc-950/70 p-3">
+              <p className="text-xs text-zinc-600">Swap</p>
+
+              <p className="mt-1 text-sm font-medium">
+                {formatPercent(snapshot.Metrics.swap_percent)}
+              </p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -443,17 +534,17 @@ function PowerStatusOverlay({ state }: { state: PowerState }) {
   );
 }
 
-export default function SystemManagement({
-  snapshot,
-  user,
-}: {
-  snapshot: Snapshot;
-  user: UserInfo;
-}) {
+/*
+ * Shared power-control component.
+ *
+ * Both Dashboard and System use this exact implementation, so confirmation,
+ * authenticated API calls, reboot polling, and reconnect handling remain in
+ * one place.
+ */
+export function SystemPowerControls() {
   const [powerState, setPowerState] = useState<PowerState>("idle");
   const [pendingAction, setPendingAction] = useState<PowerAction | null>(null);
   const [powerError, setPowerError] = useState("");
-
   const [confirmLoading, setConfirmLoading] = useState(false);
 
   useEffect(() => {
@@ -587,239 +678,83 @@ export default function SystemManagement({
     }
   };
 
-  const cpu = snapshot.Metrics.cpu_percent;
-  const memory = snapshot.Metrics.memory_percent;
-  const disk = snapshot.Metrics.disk_percent;
-
   const powerDialog = powerState === "confirm-reboot" || powerState === "confirm-shutdown";
 
   return (
     <>
-      <div className="space-y-6">
-        {powerState === "error" && powerError && (
-          <section className="flex items-start justify-between gap-4 rounded-2xl border border-red-400/20 bg-red-400/5 p-5">
+      <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+        <div className="border-b border-zinc-800 p-5 sm:p-6">
+          <div className="flex items-center gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+              <PowerIcon />
+            </div>
+
             <div>
-              <p className="text-sm font-medium text-red-300">System operation failed</p>
+              <h2 className="text-lg font-semibold">Power controls</h2>
 
-              <p className="mt-2 text-sm leading-6 text-red-400/80">{powerError}</p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setPowerState("idle");
-                setPowerError("");
-              }}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-red-400/70 transition hover:bg-red-400/10 hover:text-red-300"
-              aria-label="Dismiss error"
-            >
-              <XIcon />
-            </button>
-          </section>
-        )}
-
-        <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-          <div className="border-b border-zinc-800 p-5 sm:p-6">
-            <div className="flex items-center gap-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-                <ServerIcon />
-              </div>
-
-              <div>
-                <h2 className="text-lg font-semibold">System information</h2>
-
-                <p className="mt-1 text-sm text-zinc-500">Operating system and Linux identity</p>
-              </div>
+              <p className="mt-1 text-sm text-zinc-500">Control the VPS power state</p>
             </div>
           </div>
+        </div>
 
-          <dl className="grid gap-x-8 gap-y-7 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-3">
-            <InfoRow label="Hostname" value={snapshot.System.hostname} />
+        <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
+          <button
+            type="button"
+            disabled={powerState !== "idle" && powerState !== "error"}
+            onClick={() => requestPowerAction("reboot")}
+            className="flex min-h-24 items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-yellow-400/10 text-yellow-400">
+              <RotateIcon />
+            </div>
 
-            <InfoRow label="Operating system" value={snapshot.System.os} />
+            <div>
+              <p className="font-medium text-zinc-200">Reboot VPS</p>
 
-            <InfoRow label="Architecture" value={snapshot.System.architecture} />
+              <p className="mt-1 text-xs leading-5 text-zinc-600">Restart the entire server</p>
+            </div>
+          </button>
 
-            <InfoRow label="Kernel" value={snapshot.System.kernel} />
+          <button
+            type="button"
+            disabled={powerState !== "idle" && powerState !== "error"}
+            onClick={() => requestPowerAction("shutdown")}
+            className="flex min-h-24 items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5 text-left transition hover:border-red-400/30 hover:bg-red-400/5 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-400/10 text-red-400">
+              <PowerIcon />
+            </div>
 
-            <InfoRow label="Linux user" value={`${user.username} · UID ${user.uid}`} />
+            <div>
+              <p className="font-medium text-zinc-200">Shut down VPS</p>
 
-            <InfoRow label="Home directory" value={user.home_dir} />
+              <p className="mt-1 text-xs leading-5 text-zinc-600">Power off the entire server</p>
+            </div>
+          </button>
+        </div>
+      </section>
 
-            <InfoRow label="Shell" value={user.shell} />
+      {powerState === "error" && powerError && (
+        <section className="mt-4 flex items-start justify-between gap-4 rounded-2xl border border-red-400/20 bg-red-400/5 p-5">
+          <div>
+            <p className="text-sm font-medium text-red-300">System operation failed</p>
 
-            <InfoRow label="Uptime" value={formatUptime(snapshot.Metrics.uptime_seconds)} />
+            <p className="mt-2 text-sm leading-6 text-red-400/80">{powerError}</p>
+          </div>
 
-            <InfoRow
-              label="Load average"
-              value={`${snapshot.Metrics.load_1.toFixed(2)} / ${snapshot.Metrics.load_5.toFixed(2)} / ${snapshot.Metrics.load_15.toFixed(2)}`}
-            />
-          </dl>
+          <button
+            type="button"
+            onClick={() => {
+              setPowerState("idle");
+              setPowerError("");
+            }}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-red-400/70 transition hover:bg-red-400/10 hover:text-red-300"
+            aria-label="Dismiss error"
+          >
+            <XIcon />
+          </button>
         </section>
-
-        <section>
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold">Resources</h2>
-
-            <p className="mt-1 text-sm text-zinc-500">Current VPS resource utilization</p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <ResourceCard
-              title="CPU"
-              value={formatPercent(cpu)}
-              subtitle={`${snapshot.Metrics.load_1.toFixed(2)} current load`}
-              icon={<CpuIcon />}
-              progress={cpu}
-              progressLabel="CPU utilization"
-            />
-
-            <ResourceCard
-              title="Memory"
-              value={formatPercent(memory)}
-              subtitle={`${formatBytes(snapshot.Metrics.memory_used_bytes)} of ${formatBytes(snapshot.Metrics.memory_total_bytes)}`}
-              icon={<MemoryIcon />}
-              progress={memory}
-              progressLabel="Memory utilization"
-            />
-
-            <ResourceCard
-              title="Disk"
-              value={formatPercent(disk)}
-              subtitle={`${formatBytes(snapshot.Metrics.disk_used_bytes)} of ${formatBytes(snapshot.Metrics.disk_total_bytes)}`}
-              icon={<DiskIcon />}
-              progress={disk}
-              progressLabel="Root filesystem"
-            />
-
-            <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm text-zinc-500">System load</p>
-
-                  <p className="mt-3 text-3xl font-semibold tracking-tight">
-                    {snapshot.Metrics.load_1.toFixed(2)}
-                  </p>
-
-                  <p className="mt-2 text-xs text-zinc-500">1m / 5m / 15m load average</p>
-                </div>
-
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-                  <ActivityIcon />
-                </div>
-              </div>
-
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-zinc-950/70 p-3">
-                  <p className="text-xs text-zinc-600">Uptime</p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {formatUptime(snapshot.Metrics.uptime_seconds)}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-zinc-950/70 p-3">
-                  <p className="text-xs text-zinc-600">Swap</p>
-
-                  <p className="mt-1 text-sm font-medium">
-                    {formatPercent(snapshot.Metrics.swap_percent)}
-                  </p>
-                </div>
-              </div>
-            </section>
-          </div>
-        </section>
-
-        <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-          <div className="border-b border-zinc-800 p-5 sm:p-6">
-            <div className="flex items-center gap-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-                <PowerIcon />
-              </div>
-
-              <div>
-                <h2 className="text-lg font-semibold">Power controls</h2>
-
-                <p className="mt-1 text-sm text-zinc-500">Control the VPS power state</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
-            <button
-              type="button"
-              disabled={powerState !== "idle" && powerState !== "error"}
-              onClick={() => requestPowerAction("reboot")}
-              className="flex min-h-24 items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/70 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-yellow-400/10 text-yellow-400">
-                <RotateIcon />
-              </div>
-
-              <div>
-                <p className="font-medium text-zinc-200">Reboot VPS</p>
-
-                <p className="mt-1 text-xs leading-5 text-zinc-600">Restart the entire server</p>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              disabled={powerState !== "idle" && powerState !== "error"}
-              onClick={() => requestPowerAction("shutdown")}
-              className="flex min-h-24 items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5 text-left transition hover:border-red-400/30 hover:bg-red-400/5 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-400/10 text-red-400">
-                <PowerIcon />
-              </div>
-
-              <div>
-                <p className="font-medium text-zinc-200">Shut down VPS</p>
-
-                <p className="mt-1 text-xs leading-5 text-zinc-600">Power off the entire server</p>
-              </div>
-            </button>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
-          <div className="flex items-start gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-              <UserIcon />
-            </div>
-
-            <div className="min-w-0">
-              <h2 className="text-lg font-semibold">Authenticated Linux identity</h2>
-
-              <p className="mt-1 text-sm text-zinc-500">
-                The Linux identity associated with your panel session.
-              </p>
-
-              <div className="mt-5 grid gap-4 sm:grid-cols-3">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-zinc-600">Username</p>
-
-                  <p className="mt-2 truncate text-sm">{user.username}</p>
-                </div>
-
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-zinc-600">UID / GID</p>
-
-                  <p className="mt-2 text-sm">
-                    {user.uid} / {user.gid}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-zinc-600">Shell</p>
-
-                  <p className="mt-2 truncate font-mono text-sm">{user.shell}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
+      )}
 
       {powerDialog && pendingAction && (
         <PowerConfirmation
@@ -832,5 +767,100 @@ export default function SystemManagement({
 
       <PowerStatusOverlay state={powerState} />
     </>
+  );
+}
+
+export default function SystemManagement({
+  snapshot,
+  user,
+}: {
+  snapshot: Snapshot;
+  user: UserInfo;
+}) {
+  return (
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+        <div className="border-b border-zinc-800 p-5 sm:p-6">
+          <div className="flex items-center gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+              <ServerIcon />
+            </div>
+
+            <div>
+              <h2 className="text-lg font-semibold">System information</h2>
+
+              <p className="mt-1 text-sm text-zinc-500">Operating system and Linux identity</p>
+            </div>
+          </div>
+        </div>
+
+        <dl className="grid gap-x-8 gap-y-7 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-3">
+          <InfoRow label="Hostname" value={snapshot.System.hostname} />
+
+          <InfoRow label="Operating system" value={snapshot.System.os} />
+
+          <InfoRow label="Architecture" value={snapshot.System.architecture} />
+
+          <InfoRow label="Kernel" value={snapshot.System.kernel} />
+
+          <InfoRow label="Linux user" value={`${user.username} · UID ${user.uid}`} />
+
+          <InfoRow label="Home directory" value={user.home_dir} />
+
+          <InfoRow label="Shell" value={user.shell} />
+
+          <InfoRow label="Uptime" value={formatUptime(snapshot.Metrics.uptime_seconds)} />
+
+          <InfoRow
+            label="Load average"
+            value={`${snapshot.Metrics.load_1.toFixed(2)} / ${snapshot.Metrics.load_5.toFixed(
+              2,
+            )} / ${snapshot.Metrics.load_15.toFixed(2)}`}
+          />
+        </dl>
+      </section>
+
+      <SystemResourceGrid snapshot={snapshot} />
+
+      <SystemPowerControls />
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+            <UserIcon />
+          </div>
+
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold">Authenticated Linux identity</h2>
+
+            <p className="mt-1 text-sm text-zinc-500">
+              The Linux identity associated with your panel session.
+            </p>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">Username</p>
+
+                <p className="mt-2 truncate text-sm">{user.username}</p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">UID / GID</p>
+
+                <p className="mt-2 text-sm">
+                  {user.uid} / {user.gid}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">Shell</p>
+
+                <p className="mt-2 truncate font-mono text-sm">{user.shell}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
