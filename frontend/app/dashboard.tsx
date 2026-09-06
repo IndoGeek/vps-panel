@@ -1,11 +1,354 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getSnapshot, logout, type UserInfo } from "@/lib/api";
 
 type Snapshot = Awaited<ReturnType<typeof getSnapshot>>;
 
 type View = "dashboard" | "processes" | "sessions" | "services" | "system";
+
+type MetricHistory = {
+  cpu: number[];
+  memory: number[];
+  disk: number[];
+};
+
+const HISTORY_LENGTH = 30;
+
+function clamp(value: number, minimum = 0, maximum = 100) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+
+  let value = bytes;
+  let unit = 0;
+
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+
+  if (unit === 0) {
+    return `${Math.round(value)} ${units[unit]}`;
+  }
+
+  return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unit]}`;
+}
+
+function formatUptime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "—";
+  }
+
+  const totalMinutes = Math.floor(seconds / 60);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  return `${minutes}m`;
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+
+  return `${Math.round(value)}%`;
+}
+
+function buildSparklinePoints(values: number[], width = 320, height = 72) {
+  if (values.length === 0) {
+    return "";
+  }
+
+  if (values.length === 1) {
+    const y = height - (clamp(values[0]) / 100) * height;
+
+    return `0,${y} ${width},${y}`;
+  }
+
+  return values
+    .map((value, index) => {
+      const x = (index / (values.length - 1)) * width;
+      const y = height - (clamp(value) / 100) * height;
+
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
+}
+
+function Sparkline({ values, label }: { values: number[]; label: string }) {
+  const points = buildSparklinePoints(values);
+
+  return (
+    <div
+      className="relative mt-5 h-[82px] overflow-hidden rounded-xl bg-zinc-950/70"
+      aria-label={`${label} usage history`}
+    >
+      <svg
+        viewBox="0 0 320 72"
+        preserveAspectRatio="none"
+        className="absolute inset-x-0 bottom-0 h-[72px] w-full"
+      >
+        <line
+          x1="0"
+          y1="18"
+          x2="320"
+          y2="18"
+          stroke="currentColor"
+          strokeWidth="1"
+          className="text-zinc-800"
+        />
+
+        <line
+          x1="0"
+          y1="36"
+          x2="320"
+          y2="36"
+          stroke="currentColor"
+          strokeWidth="1"
+          className="text-zinc-800"
+        />
+
+        <line
+          x1="0"
+          y1="54"
+          x2="320"
+          y2="54"
+          stroke="currentColor"
+          strokeWidth="1"
+          className="text-zinc-800"
+        />
+
+        {points && (
+          <polyline
+            points={points}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-zinc-300"
+          />
+        )}
+      </svg>
+    </div>
+  );
+}
+
+function MetricCard({
+  title,
+  value,
+  subtitle,
+  values,
+  icon,
+}: {
+  title: string;
+  value: string;
+  subtitle: string;
+  values: number[];
+  icon: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm text-zinc-500">{title}</p>
+
+          <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
+
+          <p className="mt-2 text-xs text-zinc-500">{subtitle}</p>
+        </div>
+
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+          {icon}
+        </div>
+      </div>
+
+      <Sparkline values={values} label={title} />
+    </section>
+  );
+}
+
+function CpuIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+      <path d="M9 9h6v6H9z" />
+      <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+    </svg>
+  );
+}
+
+function MemoryIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M7 9v6M11 9v6M15 9v6M19 9v6" />
+      <path d="M3 10H1M3 14H1M23 10h-2M23 14h-2" />
+    </svg>
+  );
+}
+
+function DiskIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 3v5h8V3M8 17h8" />
+      <circle cx="12" cy="14" r="1.5" />
+    </svg>
+  );
+}
+
+function ActivityIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <path d="M3 12h4l2-6 4 12 2-6h6" />
+    </svg>
+  );
+}
+
+function ServiceIcon({ name }: { name: string }) {
+  const lower = name.toLowerCase();
+
+  if (
+    lower.includes("nginx") ||
+    lower.includes("apache") ||
+    lower.includes("caddy") ||
+    lower.includes("traefik")
+  ) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
+        <path d="M6 4h12l2 4-8 12L4 8z" />
+        <path d="M8 8h8M9 12h6M10 16h4" />
+      </svg>
+    );
+  }
+
+  if (lower.includes("redis") || lower.includes("memcached")) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
+        <ellipse cx="12" cy="6" rx="7" ry="3" />
+        <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
+        <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+      </svg>
+    );
+  }
+
+  if (
+    lower.includes("mysql") ||
+    lower.includes("mariadb") ||
+    lower.includes("postgres") ||
+    lower.includes("mongodb")
+  ) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
+        <ellipse cx="12" cy="5" rx="7" ry="3" />
+        <path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
+        <path d="M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7" />
+      </svg>
+    );
+  }
+
+  if (lower.includes("ssh") || lower.includes("sshd")) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m7 10 3 2-3 2M12 15h5" />
+      </svg>
+    );
+  }
+
+  if (lower.includes("docker") || lower.includes("containerd")) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
+        <path d="M3 13h14M5 10h3M9 10h3M13 10h3M7 7h3M11 7h3" />
+        <path d="M18 11c2 0 3 1 3 2.5 0 1.8-2 3.5-5 3.5H7c-2 0-3-1-3-3" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 8v4l3 2" />
+    </svg>
+  );
+}
 
 export default function Dashboard({
   initialSnapshot,
@@ -21,6 +364,12 @@ export default function Dashboard({
   const [refreshing, setRefreshing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [view, setView] = useState<View>("dashboard");
+
+  const [history, setHistory] = useState<MetricHistory>(() => ({
+    cpu: [initialSnapshot.Metrics.cpu_percent],
+    memory: [initialSnapshot.Metrics.memory_percent],
+    disk: [initialSnapshot.Metrics.disk_percent],
+  }));
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -48,6 +397,14 @@ export default function Dashboard({
 
         setSnapshot(nextSnapshot);
         setLastUpdated(new Date());
+
+        setHistory((previous) => ({
+          cpu: [...previous.cpu, nextSnapshot.Metrics.cpu_percent].slice(-HISTORY_LENGTH),
+
+          memory: [...previous.memory, nextSnapshot.Metrics.memory_percent].slice(-HISTORY_LENGTH),
+
+          disk: [...previous.disk, nextSnapshot.Metrics.disk_percent].slice(-HISTORY_LENGTH),
+        }));
       } catch (error) {
         console.error("Failed to refresh VPS snapshot:", error);
       } finally {
@@ -86,6 +443,11 @@ export default function Dashboard({
   const openTerminal = (sessionName: string) => {
     window.location.href = `/terminal?session=${encodeURIComponent(sessionName)}`;
   };
+
+  const activeServices = useMemo(
+    () => snapshot.Services.filter((service) => service.active).length,
+    [snapshot.Services],
+  );
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -233,27 +595,90 @@ export default function Dashboard({
 
         {view === "dashboard" && (
           <>
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <p className="text-sm text-zinc-500">Users</p>
+            <section className="grid gap-4 sm:grid-cols-2">
+              <MetricCard
+                title="CPU"
+                value={formatPercent(snapshot.Metrics.cpu_percent)}
+                subtitle={`${snapshot.Metrics.load_1.toFixed(2)} load average`}
+                values={history.cpu}
+                icon={<CpuIcon />}
+              />
 
-                <p className="mt-3 text-3xl font-semibold">{snapshot.Users.length}</p>
-              </div>
+              <MetricCard
+                title="Memory"
+                value={formatPercent(snapshot.Metrics.memory_percent)}
+                subtitle={`${formatBytes(snapshot.Metrics.memory_used_bytes)} of ${formatBytes(snapshot.Metrics.memory_total_bytes)}`}
+                values={history.memory}
+                icon={<MemoryIcon />}
+              />
 
+              <MetricCard
+                title="Disk"
+                value={formatPercent(snapshot.Metrics.disk_percent)}
+                subtitle={`${formatBytes(snapshot.Metrics.disk_used_bytes)} of ${formatBytes(snapshot.Metrics.disk_total_bytes)}`}
+                values={history.disk}
+                icon={<DiskIcon />}
+              />
+
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-zinc-500">System Load</p>
+
+                    <p className="mt-3 text-3xl font-semibold tracking-tight">
+                      {snapshot.Metrics.load_1.toFixed(2)}
+                    </p>
+
+                    <p className="mt-2 text-xs text-zinc-500">
+                      {snapshot.Metrics.load_5.toFixed(2)} · {snapshot.Metrics.load_15.toFixed(2)}{" "}
+                      over 5m / 15m
+                    </p>
+                  </div>
+
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+                    <ActivityIcon />
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-zinc-950/70 p-3">
+                    <p className="text-xs text-zinc-600">Uptime</p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatUptime(snapshot.Metrics.uptime_seconds)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-zinc-950/70 p-3">
+                    <p className="text-xs text-zinc-600">Swap</p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatPercent(snapshot.Metrics.swap_percent)}
+                    </p>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <button
                 type="button"
-                onClick={() => changeView("sessions")}
+                onClick={() => changeView("services")}
                 className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80 active:scale-[0.99]"
                 style={{
                   WebkitTapHighlightColor: "transparent",
                   touchAction: "manipulation",
                 }}
               >
-                <p className="text-sm text-zinc-500">Sessions</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-zinc-500">Services</p>
 
-                <p className="mt-3 text-3xl font-semibold">{snapshot.Sessions.length}</p>
+                  <span className="rounded-full bg-green-400/10 px-2.5 py-1 text-xs text-green-400">
+                    {activeServices} active
+                  </span>
+                </div>
 
-                <p className="mt-2 text-xs text-zinc-600">View sessions →</p>
+                <p className="mt-3 text-3xl font-semibold">{snapshot.Services.length}</p>
+
+                <p className="mt-2 text-xs text-zinc-600">View services →</p>
               </button>
 
               <button
@@ -274,25 +699,59 @@ export default function Dashboard({
 
               <button
                 type="button"
-                onClick={() => changeView("services")}
+                onClick={() => changeView("sessions")}
                 className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-left transition hover:border-zinc-700 hover:bg-zinc-800/80 active:scale-[0.99]"
                 style={{
                   WebkitTapHighlightColor: "transparent",
                   touchAction: "manipulation",
                 }}
               >
-                <p className="text-sm text-zinc-500">Services</p>
+                <p className="text-sm text-zinc-500">Tmux Sessions</p>
 
-                <p className="mt-3 text-3xl font-semibold">{snapshot.Services.length}</p>
+                <p className="mt-3 text-3xl font-semibold">{snapshot.Sessions.length}</p>
 
-                <p className="mt-2 text-xs text-zinc-600">View services →</p>
+                <p className="mt-2 text-xs text-zinc-600">Open terminal →</p>
               </button>
+
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+                <p className="text-sm text-zinc-500">Network</p>
+
+                <div className="mt-4 space-y-3">
+                  <div>
+                    <p className="text-xs text-zinc-600">Received</p>
+
+                    <p className="mt-1 text-sm font-medium">
+                      {formatBytes(snapshot.Metrics.network_rx_bytes)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-zinc-600">Transmitted</p>
+
+                    <p className="mt-1 text-sm font-medium">
+                      {formatBytes(snapshot.Metrics.network_tx_bytes)}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </section>
 
             <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-              <h2 className="text-lg font-semibold">System</h2>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">System</h2>
 
-              <p className="mt-1 text-sm text-zinc-500">Server information</p>
+                  <p className="mt-1 text-sm text-zinc-500">Server information</p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => changeView("system")}
+                  className="w-fit rounded-full bg-zinc-800 px-4 py-2 text-xs text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-200"
+                >
+                  Details →
+                </button>
+              </div>
 
               <dl className="mt-6 grid gap-6 sm:grid-cols-2">
                 <div>
@@ -442,39 +901,61 @@ export default function Dashboard({
         {view === "services" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
             <div className="border-b border-zinc-800 p-5 sm:p-6">
-              <h2 className="text-lg font-semibold">Services</h2>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold">Services</h2>
 
-              <p className="mt-1 text-sm text-zinc-500">
-                {snapshot.Services.length} system services
-              </p>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {activeServices} active · {snapshot.Services.length} total
+                  </p>
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+                  <ActivityIcon />
+                </div>
+              </div>
             </div>
 
             <div className="divide-y divide-zinc-800">
               {snapshot.Services.map((service) => (
                 <div key={service.name} className="p-4 transition hover:bg-zinc-800/40 sm:p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{service.name}</p>
-
-                      <p className="mt-1 text-xs text-zinc-500">{service.description}</p>
+                  <div className="flex items-center gap-4">
+                    <div
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                        service.active
+                          ? "bg-green-400/10 text-green-400"
+                          : "bg-zinc-800 text-zinc-500"
+                      }`}
+                    >
+                      <ServiceIcon name={service.name} />
                     </div>
 
-                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-xs ${
-                          service.active
-                            ? "bg-green-400/10 text-green-400"
-                            : "bg-zinc-800 text-zinc-500"
-                        }`}
-                      >
-                        {service.active ? "Active" : "Inactive"}
-                      </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                        <p className="truncate text-sm font-medium">{service.name}</p>
 
+                        <span
+                          className={`w-fit rounded-full px-2.5 py-1 text-[11px] ${
+                            service.active
+                              ? "bg-green-400/10 text-green-400"
+                              : "bg-zinc-800 text-zinc-500"
+                          }`}
+                        >
+                          {service.active ? "Running" : "Stopped"}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 truncate text-xs text-zinc-500">
+                        {service.description || "System service"}
+                      </p>
+                    </div>
+
+                    <div className="hidden shrink-0 sm:block">
                       <span
                         className={`rounded-full px-2.5 py-1 text-xs ${
                           service.enabled
                             ? "bg-blue-400/10 text-blue-400"
-                            : "bg-zinc-800 text-zinc-500"
+                            : "bg-zinc-800 text-zinc-600"
                         }`}
                       >
                         {service.enabled ? "Enabled" : "Disabled"}
@@ -516,6 +997,21 @@ export default function Dashboard({
                 <dt className="text-xs uppercase tracking-wide text-zinc-500">Kernel</dt>
 
                 <dd className="mt-2 text-sm">{snapshot.System.kernel}</dd>
+              </div>
+
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-zinc-500">Uptime</dt>
+
+                <dd className="mt-2 text-sm">{formatUptime(snapshot.Metrics.uptime_seconds)}</dd>
+              </div>
+
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-zinc-500">Load average</dt>
+
+                <dd className="mt-2 text-sm">
+                  {snapshot.Metrics.load_1.toFixed(2)} / {snapshot.Metrics.load_5.toFixed(2)} /{" "}
+                  {snapshot.Metrics.load_15.toFixed(2)}
+                </dd>
               </div>
             </dl>
           </section>

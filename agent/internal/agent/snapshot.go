@@ -2,6 +2,7 @@ package agent
 
 import (
 	"github.com/tanmay/vps-panel/agent/internal/identity"
+	"github.com/tanmay/vps-panel/agent/internal/metrics"
 	"github.com/tanmay/vps-panel/agent/internal/process"
 	"github.com/tanmay/vps-panel/agent/internal/service"
 	"github.com/tanmay/vps-panel/agent/internal/system"
@@ -10,6 +11,7 @@ import (
 
 type Snapshot struct {
 	System    system.Info
+	Metrics   metrics.Metrics
 	Users     []identity.User
 	Sessions  []tmux.Session
 	Processes []process.Process
@@ -18,6 +20,11 @@ type Snapshot struct {
 
 func Collect() (*Snapshot, error) {
 	info, err := system.GetInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	systemMetrics, err := metrics.Collect()
 	if err != nil {
 		return nil, err
 	}
@@ -44,6 +51,7 @@ func Collect() (*Snapshot, error) {
 
 	return &Snapshot{
 		System:    info,
+		Metrics:   systemMetrics,
 		Users:     users,
 		Sessions:  sessions,
 		Processes: processes,

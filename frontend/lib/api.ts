@@ -9,6 +9,31 @@ export type SystemInfo = {
   kernel: string;
 };
 
+export type SystemMetrics = {
+  cpu_percent: number;
+
+  memory_percent: number;
+  memory_used_bytes: number;
+  memory_total_bytes: number;
+
+  swap_percent: number;
+  swap_used_bytes: number;
+  swap_total_bytes: number;
+
+  disk_percent: number;
+  disk_used_bytes: number;
+  disk_total_bytes: number;
+
+  load_1: number;
+  load_5: number;
+  load_15: number;
+
+  uptime_seconds: number;
+
+  network_rx_bytes: number;
+  network_tx_bytes: number;
+};
+
 export type UserInfo = {
   username: string;
   uid: number;
@@ -40,6 +65,7 @@ export type ServiceInfo = {
 
 export type Snapshot = {
   System: SystemInfo;
+  Metrics: SystemMetrics;
   Users: UserInfo[];
   Sessions: SessionInfo[];
   Processes: ProcessInfo[];
