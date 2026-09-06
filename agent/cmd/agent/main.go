@@ -7,9 +7,11 @@ import (
 )
 
 func main() {
-	server := httpapi.NewServer("127.0.0.1:8091")
+	server := httpapi.NewServer(
+		"127.0.0.1:8091",
+	)
 
-	if err := server.ListenAndServe(); err != nil {
+	if err := server.ListenAndServeWithSystem(); err != nil {
 		log.Fatal(err)
 	}
 }

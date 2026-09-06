@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getAuditLogs, getSnapshot, logout, type AuditEntry, type UserInfo } from "@/lib/api";
+
 import SessionManagement from "@/app/components/SessionManagement";
+import SystemManagement from "@/app/components/SystemManagement";
 
 type Snapshot = Awaited<ReturnType<typeof getSnapshot>>;
 
@@ -1151,54 +1153,7 @@ export default function Dashboard({
           </section>
         )}
 
-        {view === "system" && (
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
-            <h2 className="text-lg font-semibold">System</h2>
-
-            <p className="mt-1 text-sm text-zinc-500">Detailed server information</p>
-
-            <dl className="mt-8 grid gap-7 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-zinc-500">Hostname</dt>
-
-                <dd className="mt-2 text-sm">{snapshot.System.hostname}</dd>
-              </div>
-
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-zinc-500">Operating system</dt>
-
-                <dd className="mt-2 text-sm">{snapshot.System.os}</dd>
-              </div>
-
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-zinc-500">Architecture</dt>
-
-                <dd className="mt-2 text-sm">{snapshot.System.architecture}</dd>
-              </div>
-
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-zinc-500">Kernel</dt>
-
-                <dd className="mt-2 text-sm">{snapshot.System.kernel}</dd>
-              </div>
-
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-zinc-500">Uptime</dt>
-
-                <dd className="mt-2 text-sm">{formatUptime(snapshot.Metrics.uptime_seconds)}</dd>
-              </div>
-
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-zinc-500">Load average</dt>
-
-                <dd className="mt-2 text-sm">
-                  {snapshot.Metrics.load_1.toFixed(2)} / {snapshot.Metrics.load_5.toFixed(2)} /{" "}
-                  {snapshot.Metrics.load_15.toFixed(2)}
-                </dd>
-              </div>
-            </dl>
-          </section>
-        )}
+        {view === "system" && <SystemManagement snapshot={snapshot} user={user} />}
       </div>
     </main>
   );

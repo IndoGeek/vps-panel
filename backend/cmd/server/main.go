@@ -50,7 +50,7 @@ func main() {
 		cfg.Port,
 	)
 
-	router := api.NewRouter(
+	router := api.NewRouterWithSystem(
 		authService,
 		auditStore,
 		cfg.AgentURL,

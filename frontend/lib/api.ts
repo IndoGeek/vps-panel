@@ -372,3 +372,44 @@ export async function deleteTmuxSessions(names: string[]): Promise<SessionDelete
     }),
   });
 }
+
+export type SystemPowerAction = "reboot" | "shutdown";
+
+export type SystemPowerResponse = {
+  success: boolean;
+  action: SystemPowerAction;
+  accepted: boolean;
+};
+
+export async function requestSystemPower(action: SystemPowerAction): Promise<SystemPowerResponse> {
+  const response = await fetch(`/api/v1/system/${action}`, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (response.status === 401) {
+    throw new Error("UNAUTHORIZED");
+  }
+
+  let body: unknown = null;
+
+  try {
+    body = await response.json();
+  } catch {
+    // Keep the HTTP status as the useful error.
+  }
+
+  if (!response.ok) {
+    if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+      throw new Error(body.error);
+    }
+
+    throw new Error(`System ${action} request failed: ${response.status}`);
+  }
+
+  return body as SystemPowerResponse;
+}
