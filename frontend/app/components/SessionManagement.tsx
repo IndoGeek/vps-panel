@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   createTmuxSession,
@@ -15,6 +15,8 @@ import {
 type SessionManagementProps = {
   onOpenTerminal: (sessionName: string) => void;
 };
+
+type SessionFilter = "all" | "attached" | "detached";
 
 function PlusIcon() {
   return (
@@ -63,6 +65,38 @@ function SelectIcon() {
     >
       <rect x="4" y="4" width="16" height="16" rx="3" />
       <path d="m8 12 2.5 2.5L16 9" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m16 16 5 5" />
+    </svg>
+  );
+}
+
+function XIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="m6 6 12 12M18 6 6 18" />
     </svg>
   );
 }
@@ -160,6 +194,22 @@ function CheckIcon() {
       strokeLinejoin="round"
     >
       <path d="m5 12 4 4L19 6" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }
@@ -350,11 +400,93 @@ function SessionMenu({
   );
 }
 
+function SearchField({
+  value,
+  onChange,
+  onClear,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="relative min-w-0 flex-1">
+      <div className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500">
+        <SearchIcon />
+      </div>
+
+      <input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Search sessions…"
+        aria-label="Search tmux sessions"
+        className="h-10 w-full rounded-full border border-zinc-800 bg-zinc-950 pl-10 pr-10 text-sm text-zinc-200 outline-none placeholder:text-zinc-600 transition focus:border-zinc-600 focus:bg-zinc-950"
+      />
+
+      {value && (
+        <button
+          type="button"
+          onClick={onClear}
+          aria-label="Clear session search"
+          className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+        >
+          <XIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FilterButton({
+  active,
+  children,
+  count,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  count: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex h-9 shrink-0 items-center gap-2 rounded-full px-3 text-xs font-medium transition ${
+        active
+          ? "bg-zinc-100 text-zinc-900"
+          : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+      }`}
+    >
+      <span>{children}</span>
+
+      <span
+        className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+          active ? "bg-zinc-900/10 text-zinc-700" : "bg-zinc-950/70 text-zinc-500"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
 export default function SessionManagement({ onOpenTerminal }: SessionManagementProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+
+  /*
+   * Search / filter state.
+   *
+   * These are intentionally client-side. The backend still owns
+   * the actual tmux operations, while the UI simply filters the
+   * session list already returned by the authenticated API.
+   */
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sessionFilter, setSessionFilter] = useState<SessionFilter>("all");
 
   /*
    * Selection UI state.
@@ -363,11 +495,8 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
    *   The user pressed the top-level Select button.
    *
    * selectionArmed:
-   *   The user pressed Select all.
-   *
-   * We deliberately keep these separate so that the normal session
-   * list remains completely clean until the user explicitly enters
-   * bulk-selection mode.
+   *   The user pressed Select all and individual checkboxes are
+   *   therefore visible.
    */
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectionArmed, setSelectionArmed] = useState(false);
@@ -437,6 +566,73 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
   }, [loadSessions]);
 
   /*
+   * Filtered session list.
+   *
+   * Search is case-insensitive and works against the tmux session
+   * name. Status filtering is applied after the search.
+   */
+  const filteredSessions = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+
+    return sessions.filter((session) => {
+      const matchesSearch =
+        normalizedQuery.length === 0 || session.name.toLowerCase().includes(normalizedQuery);
+
+      if (!matchesSearch) {
+        return false;
+      }
+
+      if (sessionFilter === "attached") {
+        return session.attached;
+      }
+
+      if (sessionFilter === "detached") {
+        return !session.attached;
+      }
+
+      return true;
+    });
+  }, [sessions, searchQuery, sessionFilter]);
+
+  const attachedCount = useMemo(
+    () => sessions.filter((session) => session.attached).length,
+    [sessions],
+  );
+
+  const detachedCount = sessions.length - attachedCount;
+
+  const hasActiveSearchOrFilter = searchQuery.trim().length > 0 || sessionFilter !== "all";
+
+  /*
+   * Only sessions currently visible through search/filter are affected
+   * by "Select all".
+   *
+   * Existing selections outside the current filter remain intact.
+   */
+  const visibleSessionNames = useMemo(
+    () => filteredSessions.map((session) => session.name),
+    [filteredSessions],
+  );
+
+  const visibleSelectedCount = useMemo(() => {
+    let count = 0;
+
+    for (const name of visibleSessionNames) {
+      if (selectedSessions.has(name)) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }, [visibleSessionNames, selectedSessions]);
+
+  const allVisibleSelected =
+    filteredSessions.length > 0 && visibleSelectedCount === filteredSessions.length;
+
+  const someVisibleSelected =
+    visibleSelectedCount > 0 && visibleSelectedCount < filteredSessions.length;
+
+  /*
    * Enter/exit bulk-selection mode.
    */
   const toggleSelectionMode = () => {
@@ -454,15 +650,44 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
   };
 
   /*
-   * "Select all" is the explicit second step.
-   *
-   * Once pressed, all checkboxes become visible. From there the
-   * user can uncheck individual sessions if they only want to
-   * delete a subset.
+   * Select all currently visible sessions.
    */
   const selectAllSessions = () => {
     setSelectionArmed(true);
-    setSelectedSessions(new Set(sessions.map((session) => session.name)));
+
+    setSelectedSessions((previous) => {
+      const next = new Set(previous);
+
+      for (const name of visibleSessionNames) {
+        next.add(name);
+      }
+
+      return next;
+    });
+  };
+
+  /*
+   * If everything currently visible is already selected, clicking
+   * Select all again clears the visible selections.
+   */
+  const toggleSelectAllVisible = () => {
+    setSelectionArmed(true);
+
+    setSelectedSessions((previous) => {
+      const next = new Set(previous);
+
+      if (allVisibleSelected) {
+        for (const name of visibleSessionNames) {
+          next.delete(name);
+        }
+      } else {
+        for (const name of visibleSessionNames) {
+          next.add(name);
+        }
+      }
+
+      return next;
+    });
   };
 
   const toggleSessionSelection = (sessionName: string) => {
@@ -483,16 +708,33 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
     });
   };
 
-  const clearSelection = () => {
+  /*
+   * Clear the currently visible selections.
+   *
+   * This is intentionally different from exiting selection mode:
+   * the user can clear their current selection and immediately
+   * select another set.
+   */
+  const clearVisibleSelection = () => {
+    setSelectedSessions((previous) => {
+      const next = new Set(previous);
+
+      for (const name of visibleSessionNames) {
+        next.delete(name);
+      }
+
+      return next;
+    });
+
+    setBulkDeleteOpen(false);
+  };
+
+  const exitSelectionMode = () => {
     setSelectionMode(false);
     setSelectionArmed(false);
     setSelectedSessions(new Set());
     setBulkDeleteOpen(false);
   };
-
-  const allSelected = sessions.length > 0 && selectedSessions.size === sessions.length;
-
-  const someSelected = selectedSessions.size > 0 && selectedSessions.size < sessions.length;
 
   const submitCreate = async () => {
     const name = newSessionName.trim();
@@ -640,14 +882,27 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
     }
   };
 
+  const clearSearchAndFilter = () => {
+    setSearchQuery("");
+    setSessionFilter("all");
+  };
+
   return (
     <>
       <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="border-b border-zinc-800 p-5 sm:p-6">
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Tmux Sessions</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-semibold">Tmux Sessions</h2>
+
+                  {hasActiveSearchOrFilter && (
+                    <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-[11px] text-zinc-500">
+                      {filteredSessions.length} shown
+                    </span>
+                  )}
+                </div>
 
                 <p className="mt-1 text-sm text-zinc-500">
                   {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
@@ -658,7 +913,7 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
                 <button
                   type="button"
                   onClick={toggleSelectionMode}
-                  disabled={loading || refreshing || sessions.length === 0}
+                  disabled={loading || refreshing || sessions.length === 0 || bulkDeleting}
                   aria-pressed={selectionMode}
                   className={`flex h-10 items-center gap-2 rounded-full px-4 text-xs font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
                     selectionMode
@@ -679,7 +934,7 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
                 >
                   <RefreshIcon />
 
-                  {refreshing ? "Refreshing" : "Refresh"}
+                  <span className="hidden sm:inline">{refreshing ? "Refreshing" : "Refresh"}</span>
                 </button>
 
                 <button
@@ -688,51 +943,114 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
                   className="flex h-10 items-center gap-2 rounded-full bg-zinc-100 px-4 text-xs font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.98]"
                 >
                   <PlusIcon />
-                  New session
+                  <span>New session</span>
                 </button>
               </div>
             </div>
 
-            {selectionMode && sessions.length > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-3">
+            {sessions.length > 0 && (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <SearchField
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  onClear={() => setSearchQuery("")}
+                />
+
+                <div className="flex max-w-full items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+                  <FilterButton
+                    active={sessionFilter === "all"}
+                    count={sessions.length}
+                    onClick={() => setSessionFilter("all")}
+                  >
+                    All
+                  </FilterButton>
+
+                  <FilterButton
+                    active={sessionFilter === "attached"}
+                    count={attachedCount}
+                    onClick={() => setSessionFilter("attached")}
+                  >
+                    Attached
+                  </FilterButton>
+
+                  <FilterButton
+                    active={sessionFilter === "detached"}
+                    count={detachedCount}
+                    onClick={() => setSessionFilter("detached")}
+                  >
+                    Detached
+                  </FilterButton>
+                </div>
+              </div>
+            )}
+
+            {hasActiveSearchOrFilter && sessions.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <p className="text-zinc-600">
+                  Showing {filteredSessions.length} of {sessions.length}{" "}
+                  {sessions.length === 1 ? "session" : "sessions"}
+                </p>
+
                 <button
                   type="button"
-                  onClick={selectAllSessions}
-                  disabled={bulkDeleting}
-                  className={`flex items-center gap-3 rounded-lg px-2 py-1.5 text-sm transition ${
-                    allSelected
-                      ? "text-zinc-100"
-                      : "text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-                  }`}
+                  onClick={clearSearchAndFilter}
+                  className="rounded-full px-3 py-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
                 >
-                  <span
-                    className={`flex h-5 w-5 items-center justify-center rounded-md border transition ${
-                      allSelected
-                        ? "border-zinc-100 bg-zinc-100 text-zinc-900"
-                        : "border-zinc-600 bg-zinc-900"
-                    }`}
-                  >
-                    {allSelected && <CheckIcon />}
-                  </span>
-
-                  <span>
-                    {allSelected
-                      ? "All sessions selected"
-                      : someSelected
-                        ? `${selectedSessions.size} selected`
-                        : "Select all"}
-                  </span>
+                  Clear filters
                 </button>
+              </div>
+            )}
+
+            {selectionMode && sessions.length > 0 && (
+              <div className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAllVisible}
+                    disabled={bulkDeleting || filteredSessions.length === 0}
+                    className={`flex items-center gap-3 rounded-lg px-2 py-1.5 text-sm transition ${
+                      allVisibleSelected
+                        ? "text-zinc-100"
+                        : "text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                    } disabled:cursor-not-allowed disabled:opacity-40`}
+                  >
+                    <span
+                      className={`flex h-5 w-5 items-center justify-center rounded-md border transition ${
+                        allVisibleSelected
+                          ? "border-zinc-100 bg-zinc-100 text-zinc-900"
+                          : "border-zinc-600 bg-zinc-900"
+                      }`}
+                    >
+                      {allVisibleSelected && <CheckIcon />}
+                    </span>
+
+                    <span>
+                      {allVisibleSelected
+                        ? "All visible selected"
+                        : someVisibleSelected
+                          ? `${visibleSelectedCount} visible selected`
+                          : hasActiveSearchOrFilter
+                            ? "Select all visible"
+                            : "Select all"}
+                    </span>
+                  </button>
+
+                  {selectedSessions.size > 0 && (
+                    <span className="rounded-full bg-zinc-800 px-3 py-1.5 text-xs text-zinc-400">
+                      {selectedSessions.size} selected
+                    </span>
+                  )}
+                </div>
 
                 {selectionArmed && selectedSessions.size > 0 && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-zinc-800 pt-3">
                     <button
                       type="button"
-                      onClick={clearSelection}
+                      onClick={clearVisibleSelection}
                       disabled={bulkDeleting}
                       className="rounded-full bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 disabled:opacity-40"
                     >
-                      Clear
+                      Clear visible
                     </button>
 
                     <button
@@ -752,18 +1070,35 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
         </div>
 
         {error && (
-          <div className="border-b border-zinc-800 bg-red-400/5 px-5 py-4 text-sm text-red-400">
-            {error}
+          <div className="flex items-start justify-between gap-4 border-b border-zinc-800 bg-red-400/5 px-5 py-4 text-sm text-red-400">
+            <span>{error}</span>
+
+            <button
+              type="button"
+              onClick={() => setError("")}
+              className="shrink-0 rounded-full p-1 text-red-400/70 transition hover:bg-red-400/10 hover:text-red-300"
+              aria-label="Dismiss error"
+            >
+              <XIcon />
+            </button>
           </div>
         )}
 
         {loading ? (
-          <div className="p-8 text-center">
-            <p className="text-sm text-zinc-500">Loading tmux sessions…</p>
+          <div className="p-10 text-center">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950">
+              <RefreshIcon />
+            </div>
+
+            <p className="mt-4 text-sm text-zinc-500">Loading tmux sessions…</p>
           </div>
         ) : sessions.length === 0 ? (
-          <div className="p-8 text-center">
-            <p className="text-sm text-zinc-400">No tmux sessions found.</p>
+          <div className="p-10 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-800 text-zinc-500">
+              <TerminalIcon />
+            </div>
+
+            <p className="mt-5 text-sm font-medium text-zinc-300">No tmux sessions found.</p>
 
             <p className="mt-2 text-xs text-zinc-600">Create a session to get started.</p>
 
@@ -775,9 +1110,33 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
               Create session
             </button>
           </div>
+        ) : filteredSessions.length === 0 ? (
+          <div className="p-10 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-800 text-zinc-500">
+              <SearchIcon />
+            </div>
+
+            <p className="mt-5 text-sm font-medium text-zinc-300">No matching sessions.</p>
+
+            <p className="mt-2 text-xs leading-5 text-zinc-600">
+              {searchQuery.trim()
+                ? `Nothing matches "${searchQuery.trim()}".`
+                : sessionFilter === "attached"
+                  ? "There are no attached tmux sessions."
+                  : "There are no detached tmux sessions."}
+            </p>
+
+            <button
+              type="button"
+              onClick={clearSearchAndFilter}
+              className="mt-5 rounded-full bg-zinc-800 px-5 py-2.5 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100"
+            >
+              Clear filters
+            </button>
+          </div>
         ) : (
           <div className="divide-y divide-zinc-800">
-            {sessions.map((session) => {
+            {filteredSessions.map((session) => {
               const selected = selectedSessions.has(session.name);
 
               return (
