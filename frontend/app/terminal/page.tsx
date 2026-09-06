@@ -73,8 +73,16 @@ export default function TerminalPage() {
   const terminalContainerRef = useRef<HTMLDivElement | null>(null);
 
   const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+
   const modifierRef = useRef<Modifier>(null);
+
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const reconnectAttemptRef = useRef(0);
+
+  const disposedRef = useRef(false);
 
   const [sessionName, setSessionName] = useState("");
   const [status, setStatus] = useState("Connecting...");
@@ -84,46 +92,183 @@ export default function TerminalPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+
     const session = params.get("session");
 
     if (!session) {
-      window.location.href = "/";
+      window.location.href = "/?view=sessions";
       return;
     }
 
     setSessionName(session);
 
+    disposedRef.current = false;
+
     let terminal: Terminal | null = null;
     let fitAddon: FitAddon | null = null;
-    let socket: WebSocket | null = null;
 
-    let disposed = false;
-    let cleanupResize: (() => void) | undefined;
+    const clearReconnectTimer = () => {
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
 
     const sendResize = () => {
-      if (!socket || socket.readyState !== WebSocket.OPEN || !terminal) {
+      const socket = socketRef.current;
+      const currentTerminal = terminalRef.current;
+
+      if (!socket || socket.readyState !== WebSocket.OPEN || !currentTerminal) {
         return;
       }
 
       socket.send(
         JSON.stringify({
           type: "resize",
-          cols: terminal.cols,
-          rows: terminal.rows,
+          cols: currentTerminal.cols,
+          rows: currentTerminal.rows,
         }),
       );
     };
 
-    const connect = async () => {
+    const connectSocket = () => {
+      if (disposedRef.current) {
+        return;
+      }
+
+      const existingSocket = socketRef.current;
+
+      if (
+        existingSocket &&
+        (existingSocket.readyState === WebSocket.OPEN ||
+          existingSocket.readyState === WebSocket.CONNECTING)
+      ) {
+        return;
+      }
+
+      clearReconnectTimer();
+
+      setStatus(reconnectAttemptRef.current === 0 ? "Connecting..." : "Reconnecting...");
+
+      const websocketUrl = getWebSocketUrl(session);
+
+      console.log("Opening terminal WebSocket:", websocketUrl);
+
+      const socket = new WebSocket(websocketUrl);
+
+      socket.binaryType = "arraybuffer";
+
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        if (disposedRef.current || socketRef.current !== socket) {
+          socket.close();
+          return;
+        }
+
+        console.log("Terminal WebSocket opened successfully");
+
+        reconnectAttemptRef.current = 0;
+
+        setStatus("Connected");
+
+        fitAddon?.fit();
+
+        sendResize();
+
+        terminal?.focus();
+      };
+
+      socket.onmessage = (event) => {
+        if (disposedRef.current || socketRef.current !== socket || !terminal) {
+          return;
+        }
+
+        if (typeof event.data === "string") {
+          terminal.write(event.data);
+          return;
+        }
+
+        if (event.data instanceof ArrayBuffer) {
+          terminal.write(new Uint8Array(event.data));
+          return;
+        }
+
+        if (event.data instanceof Blob) {
+          event.data
+            .arrayBuffer()
+            .then((buffer) => {
+              if (!disposedRef.current && socketRef.current === socket) {
+                terminal?.write(new Uint8Array(buffer));
+              }
+            })
+            .catch((error) => {
+              console.error("Failed to read terminal WebSocket data:", error);
+            });
+        }
+      };
+
+      socket.onerror = (event) => {
+        if (disposedRef.current || socketRef.current !== socket) {
+          return;
+        }
+
+        console.error("Terminal WebSocket error:", event);
+
+        setStatus("Connection error");
+      };
+
+      socket.onclose = (event) => {
+        if (disposedRef.current || socketRef.current !== socket) {
+          return;
+        }
+
+        console.error("Terminal WebSocket closed:", {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+        });
+
+        socketRef.current = null;
+
+        setStatus("Disconnected");
+
+        terminal?.write(
+          `\r\n\x1b[33mTerminal connection closed ` +
+            `(code ${event.code}` +
+            `${event.reason ? `: ${event.reason}` : ""}).\x1b[0m\r\n`,
+        );
+
+        if (disposedRef.current) {
+          return;
+        }
+
+        reconnectAttemptRef.current += 1;
+
+        const attempt = reconnectAttemptRef.current;
+
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+
+        console.log(`Terminal WebSocket reconnect scheduled in ${delay}ms`);
+
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+
+          connectSocket();
+        }, delay);
+      };
+    };
+
+    const initialize = async () => {
       try {
         const me = await getMe();
 
         if (!me.authenticated) {
-          window.location.href = "/";
+          window.location.href = "/?view=sessions";
           return;
         }
 
-        if (disposed) {
+        if (disposedRef.current) {
           return;
         }
 
@@ -136,11 +281,16 @@ export default function TerminalPage() {
         terminal = new Terminal({
           cursorBlink: true,
           convertEol: false,
+
           fontFamily:
             "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+
           fontSize: 14,
+
           scrollback: 5000,
+
           allowProposedApi: true,
+
           theme: {
             background: "#09090b",
             foreground: "#f4f4f5",
@@ -153,95 +303,17 @@ export default function TerminalPage() {
 
         fitAddon = new FitAddon();
 
+        fitAddonRef.current = fitAddon;
+
         terminal.loadAddon(fitAddon);
 
         terminal.open(terminalContainerRef.current);
 
         fitAddon.fit();
 
-        const websocketUrl = getWebSocketUrl(session);
-
-        socket = new WebSocket(websocketUrl);
-
-        socketRef.current = socket;
-
-        socket.binaryType = "arraybuffer";
-
-        socket.onopen = () => {
-          if (disposed) {
-            return;
-          }
-
-          setStatus("Connected");
-
-          fitAddon?.fit();
-
-          sendResize();
-
-          terminal?.focus();
-        };
-
-        socket.onmessage = (event) => {
-          if (!terminal) {
-            return;
-          }
-
-          if (typeof event.data === "string") {
-            terminal.write(event.data);
-            return;
-          }
-
-          if (event.data instanceof ArrayBuffer) {
-            terminal.write(new Uint8Array(event.data));
-            return;
-          }
-
-          if (event.data instanceof Blob) {
-            event.data
-              .arrayBuffer()
-              .then((buffer) => {
-                if (!disposed) {
-                  terminal?.write(new Uint8Array(buffer));
-                }
-              })
-              .catch((error) => {
-                console.error("Failed to read terminal data:", error);
-              });
-          }
-        };
-
-        socket.onerror = (event) => {
-          console.error("Terminal WebSocket error:", event);
-
-          if (disposed) {
-            return;
-          }
-
-          setStatus("Connection error");
-
-          terminal?.write("\r\n\x1b[31mWebSocket connection error.\x1b[0m\r\n");
-        };
-
-        socket.onclose = (event) => {
-          if (disposed) {
-            return;
-          }
-
-          console.error("Terminal WebSocket closed:", {
-            code: event.code,
-            reason: event.reason,
-            wasClean: event.wasClean,
-          });
-
-          setStatus("Disconnected");
-
-          terminal?.write(
-            `\r\n\x1b[33mTerminal connection closed ` +
-              `(code ${event.code}${event.reason ? `: ${event.reason}` : ""}).\x1b[0m\r\n`,
-          );
-        };
-
         terminal.onData((data) => {
+          const socket = socketRef.current;
+
           if (!socket || socket.readyState !== WebSocket.OPEN) {
             return;
           }
@@ -266,33 +338,56 @@ export default function TerminalPage() {
 
         window.addEventListener("resize", handleResize);
 
-        cleanupResize = () => {
+        // Give Safari/iOS a small amount of time to
+        // finish the page/network transition before
+        // opening the WebSocket.
+        setTimeout(() => {
+          if (!disposedRef.current) {
+            connectSocket();
+          }
+        }, 250);
+
+        return () => {
           window.removeEventListener("resize", handleResize);
         };
       } catch (error) {
         console.error("Failed to initialize terminal:", error);
 
-        if (!disposed) {
+        if (!disposedRef.current) {
           setStatus("Failed to connect");
         }
       }
     };
 
-    void connect();
+    let cleanupResize: (() => void) | undefined;
+
+    void initialize().then((cleanup) => {
+      cleanupResize = cleanup;
+    });
 
     return () => {
-      disposed = true;
+      disposedRef.current = true;
+
+      clearReconnectTimer();
 
       cleanupResize?.();
 
-      socket?.close();
-
-      terminal?.dispose();
-
-      fitAddon?.dispose();
+      const socket = socketRef.current;
 
       socketRef.current = null;
+
+      if (
+        socket &&
+        (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
+      ) {
+        socket.close(1000, "terminal page closed");
+      }
+
+      terminalRef.current?.dispose();
+      fitAddonRef.current?.dispose();
+
       terminalRef.current = null;
+      fitAddonRef.current = null;
     };
   }, []);
 
@@ -300,6 +395,7 @@ export default function TerminalPage() {
     if (modifierRef.current === nextModifier) {
       modifierRef.current = null;
       setModifier(null);
+      terminalRef.current?.focus();
       return;
     }
 
@@ -375,7 +471,7 @@ export default function TerminalPage() {
             className={`h-2 w-2 rounded-full ${
               status === "Connected"
                 ? "bg-green-400"
-                : status === "Connecting..."
+                : status === "Connecting..." || status === "Reconnecting..."
                   ? "bg-yellow-400"
                   : "bg-red-400"
             }`}
