@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getSnapshot, logout, type UserInfo } from "@/lib/api";
+import { getAuditLogs, getSnapshot, logout, type AuditEntry, type UserInfo } from "@/lib/api";
 
 type Snapshot = Awaited<ReturnType<typeof getSnapshot>>;
 
-type View = "dashboard" | "processes" | "sessions" | "services" | "system";
+type View = "dashboard" | "processes" | "sessions" | "services" | "system" | "audit";
 
 type MetricHistory = {
   cpu: number[];
@@ -364,6 +364,13 @@ export default function Dashboard({
   const [refreshing, setRefreshing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [view, setView] = useState<View>("dashboard");
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditOffset, setAuditOffset] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditStatus, setAuditStatus] = useState("");
 
   const [history, setHistory] = useState<MetricHistory>(() => ({
     cpu: [initialSnapshot.Metrics.cpu_percent],
@@ -380,7 +387,8 @@ export default function Dashboard({
       requestedView === "processes" ||
       requestedView === "sessions" ||
       requestedView === "services" ||
-      requestedView === "system"
+      requestedView === "system" ||
+      requestedView === "audit"
     ) {
       setView(requestedView);
     }
@@ -417,12 +425,90 @@ export default function Dashboard({
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (view !== "audit") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAudit = async () => {
+      try {
+        setAuditLoading(true);
+        setAuditError("");
+
+        const result = await getAuditLogs({
+          limit: 50,
+          offset: auditOffset,
+          action: auditAction,
+          status: auditStatus,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setAuditEntries(result.entries);
+        setAuditTotal(result.total);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error("Failed to load audit logs:", error);
+
+        if (error instanceof Error && error.message === "UNAUTHORIZED") {
+          window.location.reload();
+          return;
+        }
+
+        setAuditError("Unable to load audit logs.");
+      } finally {
+        if (!cancelled) {
+          setAuditLoading(false);
+        }
+      }
+    };
+
+    void loadAudit();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [view, auditOffset, auditAction, auditStatus]);
+
+  useEffect(() => {
+    if (view !== "audit") {
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      try {
+        const result = await getAuditLogs({
+          limit: 50,
+          offset: auditOffset,
+          action: auditAction,
+          status: auditStatus,
+        });
+
+        setAuditEntries(result.entries);
+
+        setAuditTotal(result.total);
+      } catch (error) {
+        console.error("Failed to refresh audit logs:", error);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [view, auditOffset, auditAction, auditStatus]);
+
   const navigation: { id: View; label: string }[] = [
     { id: "dashboard", label: "Dashboard" },
     { id: "processes", label: "Processes" },
     { id: "sessions", label: "Sessions" },
     { id: "services", label: "Services" },
     { id: "system", label: "System" },
+    { id: "audit", label: "Audit" },
   ];
 
   const changeView = (nextView: View) => {
@@ -964,6 +1050,172 @@ export default function Dashboard({
                   </div>
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+
+        {view === "audit" && (
+          <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+            <div className="border-b border-zinc-800 p-5 sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">Audit Log</h2>
+
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Security and administrative events recorded by the panel.
+                  </p>
+                </div>
+
+                <span className="w-fit rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-400">
+                  {auditTotal} {auditTotal === 1 ? "event" : "events"}
+                </span>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-zinc-500">
+                    Action
+                  </span>
+
+                  <select
+                    value={auditAction}
+                    onChange={(event) => {
+                      setAuditAction(event.target.value);
+
+                      setAuditOffset(0);
+                    }}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+                  >
+                    <option value="">All actions</option>
+
+                    <option value="auth.login">Login</option>
+
+                    <option value="auth.logout">Logout</option>
+
+                    <option value="terminal.connect">Terminal connect</option>
+
+                    <option value="terminal.disconnect">Terminal disconnect</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-xs uppercase tracking-wide text-zinc-500">
+                    Status
+                  </span>
+
+                  <select
+                    value={auditStatus}
+                    onChange={(event) => {
+                      setAuditStatus(event.target.value);
+
+                      setAuditOffset(0);
+                    }}
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+                  >
+                    <option value="">All statuses</option>
+
+                    <option value="success">Success</option>
+
+                    <option value="failure">Failure</option>
+
+                    <option value="denied">Denied</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            {auditError && (
+              <div className="border-b border-zinc-800 p-5 text-sm text-red-400">{auditError}</div>
+            )}
+
+            {auditLoading && auditEntries.length === 0 ? (
+              <div className="p-8 text-center text-sm text-zinc-500">Loading audit log…</div>
+            ) : auditEntries.length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-sm text-zinc-400">No audit events found.</p>
+
+                <p className="mt-2 text-xs text-zinc-600">
+                  Events will appear here when users sign in, sign out, or open terminals.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-zinc-800">
+                {auditEntries.map((entry) => (
+                  <article key={entry.id} className="p-5">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs ${
+                              entry.status === "success"
+                                ? "bg-green-400/10 text-green-400"
+                                : entry.status === "denied"
+                                  ? "bg-yellow-400/10 text-yellow-400"
+                                  : "bg-red-400/10 text-red-400"
+                            }`}
+                          >
+                            {entry.status}
+                          </span>
+
+                          <span className="font-mono text-sm text-zinc-200">{entry.action}</span>
+                        </div>
+
+                        <p className="mt-3 text-sm text-zinc-300">
+                          {entry.resource_name
+                            ? `${entry.resource_type}: ${entry.resource_name}`
+                            : entry.details || "Panel event"}
+                        </p>
+
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-500">
+                          <span className="rounded-full bg-zinc-800 px-2.5 py-1">
+                            User {entry.username || "unknown"}
+                          </span>
+
+                          {entry.ip_address && (
+                            <span className="rounded-full bg-zinc-800 px-2.5 py-1">
+                              IP {entry.ip_address}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 text-xs text-zinc-500 lg:text-right">
+                        <p>{new Date(entry.created_at).toLocaleString()}</p>
+
+                        {entry.details && (
+                          <p className="mt-1 max-w-md text-zinc-600">{entry.details}</p>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3 border-t border-zinc-800 p-4">
+              <button
+                type="button"
+                disabled={auditOffset === 0 || auditLoading}
+                onClick={() => setAuditOffset(Math.max(0, auditOffset - 50))}
+                className="rounded-full bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ← Newer
+              </button>
+
+              <span className="text-xs text-zinc-600">
+                {auditTotal === 0
+                  ? "0"
+                  : `${auditOffset + 1}–${Math.min(auditOffset + 50, auditTotal)}`}
+              </span>
+
+              <button
+                type="button"
+                disabled={auditOffset + 50 >= auditTotal || auditLoading}
+                onClick={() => setAuditOffset(auditOffset + 50)}
+                className="rounded-full bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Older →
+              </button>
             </div>
           </section>
         )}
