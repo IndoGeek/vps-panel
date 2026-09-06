@@ -9,7 +9,7 @@
 
 # Go build outputs
 /backend/server
-/agent/server
+/agent/agent
 
 # Node
 node_modules/
