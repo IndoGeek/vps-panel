@@ -30,30 +30,36 @@ func ListSessions() ([]Session, error) {
 
 	err := cmd.Run()
 	if err != nil {
+		stderrText := stderr.String()
+
 		// tmux returns an error when there is no server.
-		if strings.Contains(stderr.String(), "no server running") ||
-			strings.Contains(stderr.String(), "No such file or directory") {
+		if strings.Contains(stderrText, "no server running") ||
+			strings.Contains(stderrText, "No such file or directory") {
 			return []Session{}, nil
 		}
 
 		return nil, fmt.Errorf(
 			"tmux list-sessions: %w: %s",
 			err,
-			stderr.String(),
+			stderrText,
 		)
 	}
 
-	var sessions []Session
+	output := strings.TrimSpace(stdout.String())
 
-	for _, line := range strings.Split(
-		strings.TrimSpace(stdout.String()),
-		"\n",
-	) {
+	if output == "" {
+		return []Session{}, nil
+	}
+
+	sessions := make([]Session, 0)
+
+	for _, line := range strings.Split(output, "\n") {
 		if line == "" {
 			continue
 		}
 
 		parts := strings.Split(line, "\t")
+
 		if len(parts) != 3 {
 			continue
 		}
@@ -65,11 +71,14 @@ func ListSessions() ([]Session, error) {
 
 		attached := parts[2] == "1"
 
-		sessions = append(sessions, Session{
-			Name:     parts[0],
-			Windows:  windows,
-			Attached: attached,
-		})
+		sessions = append(
+			sessions,
+			Session{
+				Name:     parts[0],
+				Windows:  windows,
+				Attached: attached,
+			},
+		)
 	}
 
 	return sessions, nil
@@ -92,4 +101,243 @@ func HasSession(name string) bool {
 	}
 
 	return false
+}
+
+func validateSessionName(name string) error {
+	name = strings.TrimSpace(name)
+
+	if name == "" {
+		return fmt.Errorf("session name is required")
+	}
+
+	if len(name) > 64 {
+		return fmt.Errorf("session name must not exceed 64 characters")
+	}
+
+	for _, character := range name {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '-' ||
+			character == '_' ||
+			character == '.' {
+			continue
+		}
+
+		return fmt.Errorf(
+			"session name may contain only letters, numbers, hyphens, underscores, and dots",
+		)
+	}
+
+	return nil
+}
+
+func CreateSession(name string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+
+	if HasSession(name) {
+		return fmt.Errorf(
+			"tmux session %q already exists",
+			name,
+		)
+	}
+
+	cmd := exec.Command(
+		"tmux",
+		"new-session",
+		"-d",
+		"-s",
+		name,
+	)
+
+	var stderr bytes.Buffer
+
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+
+		if message == "" {
+			return fmt.Errorf(
+				"tmux create session: %w",
+				err,
+			)
+		}
+
+		return fmt.Errorf(
+			"tmux create session: %w: %s",
+			err,
+			message,
+		)
+	}
+
+	return nil
+}
+
+func RenameSession(
+	currentName string,
+	newName string,
+) error {
+	if err := validateSessionName(currentName); err != nil {
+		return err
+	}
+
+	if err := validateSessionName(newName); err != nil {
+		return fmt.Errorf(
+			"invalid new session name: %w",
+			err,
+		)
+	}
+
+	if currentName == newName {
+		return fmt.Errorf(
+			"new session name is the same as the current name",
+		)
+	}
+
+	if !HasSession(currentName) {
+		return fmt.Errorf(
+			"tmux session %q not found",
+			currentName,
+		)
+	}
+
+	if HasSession(newName) {
+		return fmt.Errorf(
+			"tmux session %q already exists",
+			newName,
+		)
+	}
+
+	cmd := exec.Command(
+		"tmux",
+		"rename-session",
+		"-t",
+		currentName,
+		newName,
+	)
+
+	var stderr bytes.Buffer
+
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+
+		if message == "" {
+			return fmt.Errorf(
+				"tmux rename session: %w",
+				err,
+			)
+		}
+
+		return fmt.Errorf(
+			"tmux rename session: %w: %s",
+			err,
+			message,
+		)
+	}
+
+	return nil
+}
+
+func DetachSession(name string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+
+	if !HasSession(name) {
+		return fmt.Errorf(
+			"tmux session %q not found",
+			name,
+		)
+	}
+
+	cmd := exec.Command(
+		"tmux",
+		"detach-client",
+		"-s",
+		name,
+	)
+
+	var stderr bytes.Buffer
+
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+
+		/*
+			There may be no clients attached.
+
+			This is not considered a fatal error because
+			the desired final state is simply "detached".
+		*/
+		if strings.Contains(
+			strings.ToLower(message),
+			"no client",
+		) {
+			return nil
+		}
+
+		if message == "" {
+			return fmt.Errorf(
+				"tmux detach session: %w",
+				err,
+			)
+		}
+
+		return fmt.Errorf(
+			"tmux detach session: %w: %s",
+			err,
+			message,
+		)
+	}
+
+	return nil
+}
+
+func DeleteSession(name string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+
+	if !HasSession(name) {
+		return fmt.Errorf(
+			"tmux session %q not found",
+			name,
+		)
+	}
+
+	cmd := exec.Command(
+		"tmux",
+		"kill-session",
+		"-t",
+		name,
+	)
+
+	var stderr bytes.Buffer
+
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+
+		if message == "" {
+			return fmt.Errorf(
+				"tmux delete session: %w",
+				err,
+			)
+		}
+
+		return fmt.Errorf(
+			"tmux delete session: %w: %s",
+			err,
+			message,
+		)
+	}
+
+	return nil
 }

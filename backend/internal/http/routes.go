@@ -299,6 +299,605 @@ func NewRouter(
 		},
 	)
 
+	/*
+		Protected tmux session management API.
+
+		This is intentionally separate from the interactive
+		terminal WebSocket endpoint below.
+
+		GET:
+			list sessions
+
+		POST:
+			create session
+
+		PATCH:
+			rename session
+
+		POST /{name}/detach:
+			detach session
+
+		DELETE:
+			delete one session
+
+		DELETE collection:
+			delete multiple sessions
+	*/
+	mux.HandleFunc(
+		"/api/v1/tmux/sessions",
+		func(w http.ResponseWriter, r *http.Request) {
+			currentIdentity, authenticated := authService.Current(r)
+
+			if !authenticated {
+				http.Error(
+					w,
+					"unauthorized",
+					http.StatusUnauthorized,
+				)
+				return
+			}
+
+			switch r.Method {
+			case http.MethodGet:
+				sessions, err := client.ListTmuxSessions()
+				if err != nil {
+					log.Printf(
+						"failed to list tmux sessions: %v",
+						err,
+					)
+
+					http.Error(
+						w,
+						"agent unavailable",
+						http.StatusBadGateway,
+					)
+
+					return
+				}
+
+				writeJSON(
+					w,
+					http.StatusOK,
+					map[string]any{
+						"sessions": sessions,
+					},
+				)
+
+			case http.MethodPost:
+				var request struct {
+					Name string `json:"name"`
+				}
+
+				if err := json.NewDecoder(
+					r.Body,
+				).Decode(&request); err != nil {
+					recordAudit(
+						r,
+						auditStore,
+						audit.Event{
+							Username:  currentIdentity.Username,
+							Action:    "tmux.session.create",
+							Status:    "failure",
+							IPAddress: clientIPAddress(r),
+							UserAgent: r.UserAgent(),
+							Details:   "invalid request body",
+						},
+					)
+
+					http.Error(
+						w,
+						"invalid request body",
+						http.StatusBadRequest,
+					)
+
+					return
+				}
+
+				request.Name = strings.TrimSpace(
+					request.Name,
+				)
+
+				if request.Name == "" {
+					recordAudit(
+						r,
+						auditStore,
+						audit.Event{
+							Username:     currentIdentity.Username,
+							Action:       "tmux.session.create",
+							ResourceType: "tmux_session",
+							ResourceName: request.Name,
+							Status:       "failure",
+							IPAddress:    clientIPAddress(r),
+							UserAgent:    r.UserAgent(),
+							Details:      "session name is required",
+						},
+					)
+
+					http.Error(
+						w,
+						"session name is required",
+						http.StatusBadRequest,
+					)
+
+					return
+				}
+
+				if err := client.CreateTmuxSession(
+					request.Name,
+				); err != nil {
+					recordAudit(
+						r,
+						auditStore,
+						audit.Event{
+							Username:     currentIdentity.Username,
+							Action:       "tmux.session.create",
+							ResourceType: "tmux_session",
+							ResourceName: request.Name,
+							Status:       "failure",
+							IPAddress:    clientIPAddress(r),
+							UserAgent:    r.UserAgent(),
+							Details:      err.Error(),
+						},
+					)
+
+					writeAgentError(
+						w,
+						err,
+					)
+
+					return
+				}
+
+				recordAudit(
+					r,
+					auditStore,
+					audit.Event{
+						Username:     currentIdentity.Username,
+						Action:       "tmux.session.create",
+						ResourceType: "tmux_session",
+						ResourceName: request.Name,
+						Status:       "success",
+						IPAddress:    clientIPAddress(r),
+						UserAgent:    r.UserAgent(),
+						Details:      "tmux session created",
+					},
+				)
+
+				writeJSON(
+					w,
+					http.StatusCreated,
+					map[string]any{
+						"session": request.Name,
+						"success": true,
+					},
+				)
+
+			case http.MethodDelete:
+				var request struct {
+					Names []string `json:"names"`
+				}
+
+				if err := json.NewDecoder(
+					r.Body,
+				).Decode(&request); err != nil {
+					http.Error(
+						w,
+						"invalid request body",
+						http.StatusBadRequest,
+					)
+					return
+				}
+
+				if len(request.Names) == 0 {
+					http.Error(
+						w,
+						"at least one session name is required",
+						http.StatusBadRequest,
+					)
+					return
+				}
+
+				results := make(
+					[]map[string]any,
+					0,
+					len(request.Names),
+				)
+
+				successCount := 0
+
+				for _, name := range request.Names {
+					name = strings.TrimSpace(name)
+
+					if name == "" {
+						continue
+					}
+
+					err := client.DeleteTmuxSession(
+						name,
+					)
+					if err != nil {
+						recordAudit(
+							r,
+							auditStore,
+							audit.Event{
+								Username:     currentIdentity.Username,
+								Action:       "tmux.session.delete",
+								ResourceType: "tmux_session",
+								ResourceName: name,
+								Status:       "failure",
+								IPAddress:    clientIPAddress(r),
+								UserAgent:    r.UserAgent(),
+								Details:      err.Error(),
+							},
+						)
+
+						results = append(
+							results,
+							map[string]any{
+								"name":    name,
+								"success": false,
+								"error":   err.Error(),
+							},
+						)
+
+						continue
+					}
+
+					successCount++
+
+					recordAudit(
+						r,
+						auditStore,
+						audit.Event{
+							Username:     currentIdentity.Username,
+							Action:       "tmux.session.delete",
+							ResourceType: "tmux_session",
+							ResourceName: name,
+							Status:       "success",
+							IPAddress:    clientIPAddress(r),
+							UserAgent:    r.UserAgent(),
+							Details:      "tmux session deleted",
+						},
+					)
+
+					results = append(
+						results,
+						map[string]any{
+							"name":    name,
+							"success": true,
+						},
+					)
+				}
+
+				status := http.StatusOK
+
+				if successCount == 0 {
+					status = http.StatusBadGateway
+				} else if successCount != len(results) {
+					status = http.StatusMultiStatus
+				}
+
+				writeJSON(
+					w,
+					status,
+					map[string]any{
+						"success":    successCount > 0,
+						"requested":  len(request.Names),
+						"successful": successCount,
+						"results":    results,
+					},
+				)
+
+			default:
+				http.Error(
+					w,
+					"method not allowed",
+					http.StatusMethodNotAllowed,
+				)
+			}
+		},
+	)
+
+	/*
+		Individual tmux session management.
+
+		The trailing slash route is used for:
+
+			PATCH /api/v1/tmux/sessions/{name}
+
+			POST /api/v1/tmux/sessions/{name}/detach
+
+			DELETE /api/v1/tmux/sessions/{name}
+	*/
+	mux.HandleFunc(
+		"/api/v1/tmux/sessions/",
+		func(w http.ResponseWriter, r *http.Request) {
+			currentIdentity, authenticated := authService.Current(r)
+
+			if !authenticated {
+				http.Error(
+					w,
+					"unauthorized",
+					http.StatusUnauthorized,
+				)
+				return
+			}
+
+			path := strings.TrimPrefix(
+				r.URL.Path,
+				"/api/v1/tmux/sessions/",
+			)
+
+			path = strings.Trim(
+				path,
+				"/",
+			)
+
+			if path == "" {
+				http.Error(
+					w,
+					"session name is required",
+					http.StatusBadRequest,
+				)
+				return
+			}
+
+			parts := strings.Split(
+				path,
+				"/",
+			)
+
+			sessionName := strings.TrimSpace(
+				parts[0],
+			)
+
+			if sessionName == "" {
+				http.Error(
+					w,
+					"session name is required",
+					http.StatusBadRequest,
+				)
+				return
+			}
+
+			/*
+				Detach endpoint.
+			*/
+			if len(parts) == 2 &&
+				parts[1] == "detach" {
+
+				if r.Method != http.MethodPost {
+					http.Error(
+						w,
+						"method not allowed",
+						http.StatusMethodNotAllowed,
+					)
+					return
+				}
+
+				err := client.DetachTmuxSession(
+					sessionName,
+				)
+				if err != nil {
+					recordAudit(
+						r,
+						auditStore,
+						audit.Event{
+							Username:     currentIdentity.Username,
+							Action:       "tmux.session.detach",
+							ResourceType: "tmux_session",
+							ResourceName: sessionName,
+							Status:       "failure",
+							IPAddress:    clientIPAddress(r),
+							UserAgent:    r.UserAgent(),
+							Details:      err.Error(),
+						},
+					)
+
+					writeAgentError(
+						w,
+						err,
+					)
+
+					return
+				}
+
+				recordAudit(
+					r,
+					auditStore,
+					audit.Event{
+						Username:     currentIdentity.Username,
+						Action:       "tmux.session.detach",
+						ResourceType: "tmux_session",
+						ResourceName: sessionName,
+						Status:       "success",
+						IPAddress:    clientIPAddress(r),
+						UserAgent:    r.UserAgent(),
+						Details:      "tmux session detached",
+					},
+				)
+
+				writeJSON(
+					w,
+					http.StatusOK,
+					map[string]any{
+						"session": sessionName,
+						"success": true,
+					},
+				)
+
+				return
+			}
+
+			if len(parts) != 1 {
+				http.Error(
+					w,
+					"invalid tmux session path",
+					http.StatusBadRequest,
+				)
+				return
+			}
+
+			switch r.Method {
+			case http.MethodPatch:
+				var request struct {
+					Name string `json:"name"`
+				}
+
+				if err := json.NewDecoder(
+					r.Body,
+				).Decode(&request); err != nil {
+					recordAudit(
+						r,
+						auditStore,
+						audit.Event{
+							Username:     currentIdentity.Username,
+							Action:       "tmux.session.rename",
+							ResourceType: "tmux_session",
+							ResourceName: sessionName,
+							Status:       "failure",
+							IPAddress:    clientIPAddress(r),
+							UserAgent:    r.UserAgent(),
+							Details:      "invalid request body",
+						},
+					)
+
+					http.Error(
+						w,
+						"invalid request body",
+						http.StatusBadRequest,
+					)
+
+					return
+				}
+
+				request.Name = strings.TrimSpace(
+					request.Name,
+				)
+
+				if request.Name == "" {
+					http.Error(
+						w,
+						"new session name is required",
+						http.StatusBadRequest,
+					)
+
+					return
+				}
+
+				if err := client.RenameTmuxSession(
+					sessionName,
+					request.Name,
+				); err != nil {
+					recordAudit(
+						r,
+						auditStore,
+						audit.Event{
+							Username:     currentIdentity.Username,
+							Action:       "tmux.session.rename",
+							ResourceType: "tmux_session",
+							ResourceName: sessionName,
+							Status:       "failure",
+							IPAddress:    clientIPAddress(r),
+							UserAgent:    r.UserAgent(),
+							Details:      err.Error(),
+						},
+					)
+
+					writeAgentError(
+						w,
+						err,
+					)
+
+					return
+				}
+
+				recordAudit(
+					r,
+					auditStore,
+					audit.Event{
+						Username:     currentIdentity.Username,
+						Action:       "tmux.session.rename",
+						ResourceType: "tmux_session",
+						ResourceName: sessionName,
+						Status:       "success",
+						IPAddress:    clientIPAddress(r),
+						UserAgent:    r.UserAgent(),
+						Details:      "renamed to " + request.Name,
+					},
+				)
+
+				writeJSON(
+					w,
+					http.StatusOK,
+					map[string]any{
+						"session":  request.Name,
+						"previous": sessionName,
+						"success":  true,
+					},
+				)
+
+			case http.MethodDelete:
+				if err := client.DeleteTmuxSession(
+					sessionName,
+				); err != nil {
+					recordAudit(
+						r,
+						auditStore,
+						audit.Event{
+							Username:     currentIdentity.Username,
+							Action:       "tmux.session.delete",
+							ResourceType: "tmux_session",
+							ResourceName: sessionName,
+							Status:       "failure",
+							IPAddress:    clientIPAddress(r),
+							UserAgent:    r.UserAgent(),
+							Details:      err.Error(),
+						},
+					)
+
+					writeAgentError(
+						w,
+						err,
+					)
+
+					return
+				}
+
+				recordAudit(
+					r,
+					auditStore,
+					audit.Event{
+						Username:     currentIdentity.Username,
+						Action:       "tmux.session.delete",
+						ResourceType: "tmux_session",
+						ResourceName: sessionName,
+						Status:       "success",
+						IPAddress:    clientIPAddress(r),
+						UserAgent:    r.UserAgent(),
+						Details:      "tmux session deleted",
+					},
+				)
+
+				writeJSON(
+					w,
+					http.StatusOK,
+					map[string]any{
+						"session": sessionName,
+						"success": true,
+					},
+				)
+
+			default:
+				http.Error(
+					w,
+					"method not allowed",
+					http.StatusMethodNotAllowed,
+				)
+			}
+		},
+	)
+
 	// Protected audit endpoint.
 	mux.HandleFunc(
 		"/api/v1/audit",
@@ -816,6 +1415,51 @@ func parseIntQuery(
 	}
 
 	return value
+}
+
+func writeAgentError(
+	w http.ResponseWriter,
+	err error,
+) {
+	message := err.Error()
+
+	status := http.StatusBadGateway
+
+	lower := strings.ToLower(
+		message,
+	)
+
+	switch {
+	case strings.Contains(
+		lower,
+		"status 400",
+	):
+		status = http.StatusBadRequest
+
+	case strings.Contains(
+		lower,
+		"status 404",
+	):
+		status = http.StatusNotFound
+
+	case strings.Contains(
+		lower,
+		"status 409",
+	):
+		status = http.StatusConflict
+
+	case strings.Contains(
+		lower,
+		"status 500",
+	):
+		status = http.StatusBadGateway
+	}
+
+	http.Error(
+		w,
+		message,
+		status,
+	)
 }
 
 func writeJSON(
