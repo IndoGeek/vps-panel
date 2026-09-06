@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+
 import {
   createTmuxSession,
   deleteTmuxSession,
@@ -45,6 +46,23 @@ function RefreshIcon() {
       <path d="M4 4v4h4" />
       <path d="M4 13a8.1 8.1 0 0 0 14.7 4.7L20 16" />
       <path d="M20 20v-4h-4" />
+    </svg>
+  );
+}
+
+function SelectIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <path d="m8 12 2.5 2.5L16 9" />
     </svg>
   );
 }
@@ -266,7 +284,6 @@ function SessionMenu({
         aria-expanded={open}
         onClick={(event) => {
           event.stopPropagation();
-
           setOpen((current) => !current);
         }}
         className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 active:scale-95"
@@ -339,6 +356,21 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
+  /*
+   * Selection UI state.
+   *
+   * selectionMode:
+   *   The user pressed the top-level Select button.
+   *
+   * selectionArmed:
+   *   The user pressed Select all.
+   *
+   * We deliberately keep these separate so that the normal session
+   * list remains completely clean until the user explicitly enters
+   * bulk-selection mode.
+   */
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectionArmed, setSelectionArmed] = useState(false);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(() => new Set());
 
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -404,7 +436,40 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
     void loadSessions();
   }, [loadSessions]);
 
+  /*
+   * Enter/exit bulk-selection mode.
+   */
+  const toggleSelectionMode = () => {
+    if (selectionMode) {
+      setSelectionMode(false);
+      setSelectionArmed(false);
+      setSelectedSessions(new Set());
+      setBulkDeleteOpen(false);
+      return;
+    }
+
+    setSelectionMode(true);
+    setSelectionArmed(false);
+    setSelectedSessions(new Set());
+  };
+
+  /*
+   * "Select all" is the explicit second step.
+   *
+   * Once pressed, all checkboxes become visible. From there the
+   * user can uncheck individual sessions if they only want to
+   * delete a subset.
+   */
+  const selectAllSessions = () => {
+    setSelectionArmed(true);
+    setSelectedSessions(new Set(sessions.map((session) => session.name)));
+  };
+
   const toggleSessionSelection = (sessionName: string) => {
+    if (!selectionArmed) {
+      return;
+    }
+
     setSelectedSessions((previous) => {
       const next = new Set(previous);
 
@@ -418,12 +483,11 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
     });
   };
 
-  const selectAllSessions = () => {
-    setSelectedSessions(new Set(sessions.map((session) => session.name)));
-  };
-
   const clearSelection = () => {
+    setSelectionMode(false);
+    setSelectionArmed(false);
     setSelectedSessions(new Set());
+    setBulkDeleteOpen(false);
   };
 
   const allSelected = sessions.length > 0 && selectedSessions.size === sessions.length;
@@ -562,6 +626,8 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
       await deleteTmuxSessions(names);
 
       setSelectedSessions(new Set());
+      setSelectionMode(false);
+      setSelectionArmed(false);
       setBulkDeleteOpen(false);
 
       await loadSessions(true);
@@ -591,6 +657,22 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={toggleSelectionMode}
+                  disabled={loading || refreshing || sessions.length === 0}
+                  aria-pressed={selectionMode}
+                  className={`flex h-10 items-center gap-2 rounded-full px-4 text-xs font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${
+                    selectionMode
+                      ? "bg-zinc-100 text-zinc-900 hover:bg-white"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+                  }`}
+                >
+                  <SelectIcon />
+
+                  {selectionMode ? "Cancel" : "Select"}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => void loadSessions(true)}
                   disabled={refreshing || loading}
                   className="flex h-10 items-center gap-2 rounded-full bg-zinc-800 px-4 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
@@ -611,26 +693,27 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
               </div>
             </div>
 
-            {sessions.length > 0 && (
+            {selectionMode && sessions.length > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-3">
-                <label className="flex cursor-pointer items-center gap-3 text-sm text-zinc-300">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    ref={(element) => {
-                      if (element) {
-                        element.indeterminate = someSelected;
-                      }
-                    }}
-                    onChange={() => {
-                      if (allSelected || someSelected) {
-                        clearSelection();
-                      } else {
-                        selectAllSessions();
-                      }
-                    }}
-                    className="h-4 w-4 accent-zinc-100"
-                  />
+                <button
+                  type="button"
+                  onClick={selectAllSessions}
+                  disabled={bulkDeleting}
+                  className={`flex items-center gap-3 rounded-lg px-2 py-1.5 text-sm transition ${
+                    allSelected
+                      ? "text-zinc-100"
+                      : "text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                  }`}
+                >
+                  <span
+                    className={`flex h-5 w-5 items-center justify-center rounded-md border transition ${
+                      allSelected
+                        ? "border-zinc-100 bg-zinc-100 text-zinc-900"
+                        : "border-zinc-600 bg-zinc-900"
+                    }`}
+                  >
+                    {allSelected && <CheckIcon />}
+                  </span>
 
                   <span>
                     {allSelected
@@ -639,9 +722,9 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
                         ? `${selectedSessions.size} selected`
                         : "Select all"}
                   </span>
-                </label>
+                </button>
 
-                {selectedSessions.size > 0 && (
+                {selectionArmed && selectedSessions.size > 0 && (
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -705,20 +788,22 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
                   }`}
                 >
                   <div className="flex items-center gap-3 sm:gap-4">
-                    <label
-                      className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full hover:bg-zinc-800"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        onChange={() => toggleSessionSelection(session.name)}
-                        aria-label={`Select ${session.name}`}
-                        className="h-4 w-4 accent-zinc-100"
-                      />
-                    </label>
+                    {selectionArmed && (
+                      <label
+                        className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full hover:bg-zinc-800"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleSessionSelection(session.name)}
+                          aria-label={`Select ${session.name}`}
+                          className="h-4 w-4 accent-zinc-100"
+                        />
+                      </label>
+                    )}
 
                     <button
                       type="button"
