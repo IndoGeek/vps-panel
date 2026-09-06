@@ -9,7 +9,13 @@ const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
 const port = Number(process.env.PORT || 3000);
 
-const backendWsUrl = process.env.BACKEND_WS_URL || "ws://127.0.0.1:8090";
+/*
+ * The VPS agent listens on 127.0.0.1:8091.
+ *
+ * BACKEND_WS_URL can still override this value when needed,
+ * but 8091 is the correct default for the current agent.
+ */
+const backendWsUrl = process.env.BACKEND_WS_URL || "ws://127.0.0.1:8091";
 
 const app = next({
   dev,
@@ -39,9 +45,12 @@ const server = createServer(async (req, res) => {
 const websocketServer = new WebSocketServer({
   noServer: true,
 
-  // Do not use compression for the terminal.
-  // This keeps terminal frames simple and avoids unnecessary
-  // extension negotiation on mobile browsers.
+  /*
+   * Do not use compression for the terminal.
+   *
+   * This keeps terminal frames simple and avoids unnecessary
+   * extension negotiation on mobile browsers.
+   */
   perMessageDeflate: false,
 });
 
@@ -136,8 +145,13 @@ server.on("upgrade", (request, socket, head) => {
       }
     };
 
+    /*
+     * Browser -> backend
+     */
     browserSocket.on("message", (data, isBinary) => {
       if (backendSocket.readyState !== WebSocket.OPEN) {
+        console.warn("Browser terminal message received before backend WebSocket opened.");
+
         return;
       }
 
@@ -152,6 +166,9 @@ server.on("upgrade", (request, socket, head) => {
       }
     });
 
+    /*
+     * Backend -> browser
+     */
     backendSocket.on("message", (data, isBinary) => {
       if (browserSocket.readyState !== WebSocket.OPEN) {
         return;
@@ -168,6 +185,9 @@ server.on("upgrade", (request, socket, head) => {
       }
     });
 
+    /*
+     * Backend connection successfully established.
+     */
     backendSocket.on("open", () => {
       console.log(
         "Terminal WebSocket connected to backend:",
@@ -175,6 +195,9 @@ server.on("upgrade", (request, socket, head) => {
       );
     });
 
+    /*
+     * Backend closed the terminal.
+     */
     backendSocket.on("close", (code, reason) => {
       console.log(
         "Terminal backend WebSocket closed:",
@@ -185,12 +208,21 @@ server.on("upgrade", (request, socket, head) => {
       closeBoth(`backend closed ${code} ${reason?.toString() || ""}`.trim());
     });
 
+    /*
+     * Backend connection error.
+     *
+     * This is especially useful for detecting a
+     * wrong BACKEND_WS_URL or unavailable agent.
+     */
     backendSocket.on("error", (error) => {
       console.error("Backend terminal WebSocket error:", error);
 
       closeBoth("backend websocket error");
     });
 
+    /*
+     * Browser closed the terminal.
+     */
     browserSocket.on("close", (code, reason) => {
       console.log(
         "Terminal browser socket closed:",
@@ -232,6 +264,7 @@ server.on("upgrade", (request, socket, head) => {
           console.error("Backend terminal ping failed:", error);
 
           clearInterval(heartbeat);
+
           closeBoth("backend ping failed");
         }
       }
@@ -242,6 +275,7 @@ server.on("upgrade", (request, socket, head) => {
     };
 
     browserSocket.once("close", cleanupHeartbeat);
+
     backendSocket.once("close", cleanupHeartbeat);
   });
 });
