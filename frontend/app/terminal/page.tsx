@@ -10,9 +10,7 @@ import { getMe } from "@/lib/api";
 function getWebSocketUrl(session: string): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-  return `${protocol}//${window.location.host}/api/v1/tmux/connect?name=${encodeURIComponent(
-    session,
-  )}`;
+  return `${protocol}//${window.location.host}/terminal-ws?name=${encodeURIComponent(session)}`;
 }
 
 type Modifier = "ctrl" | "alt" | "shift" | null;
@@ -73,7 +71,9 @@ export default function TerminalPage() {
   const terminalContainerRef = useRef<HTMLDivElement | null>(null);
 
   const terminalRef = useRef<Terminal | null>(null);
+
   const fitAddonRef = useRef<FitAddon | null>(null);
+
   const socketRef = useRef<WebSocket | null>(null);
 
   const modifierRef = useRef<Modifier>(null);
@@ -85,7 +85,9 @@ export default function TerminalPage() {
   const disposedRef = useRef(false);
 
   const [sessionName, setSessionName] = useState("");
+
   const [status, setStatus] = useState("Connecting...");
+
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
 
   const [modifier, setModifier] = useState<Modifier>(null);
@@ -97,6 +99,7 @@ export default function TerminalPage() {
 
     if (!session) {
       window.location.href = "/?view=sessions";
+
       return;
     }
 
@@ -105,17 +108,20 @@ export default function TerminalPage() {
     disposedRef.current = false;
 
     let terminal: Terminal | null = null;
+
     let fitAddon: FitAddon | null = null;
 
     const clearReconnectTimer = () => {
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current);
+
         reconnectTimerRef.current = null;
       }
     };
 
     const sendResize = () => {
       const socket = socketRef.current;
+
       const currentTerminal = terminalRef.current;
 
       if (!socket || socket.readyState !== WebSocket.OPEN || !currentTerminal) {
@@ -163,6 +169,7 @@ export default function TerminalPage() {
       socket.onopen = () => {
         if (disposedRef.current || socketRef.current !== socket) {
           socket.close();
+
           return;
         }
 
@@ -186,11 +193,13 @@ export default function TerminalPage() {
 
         if (typeof event.data === "string") {
           terminal.write(event.data);
+
           return;
         }
 
         if (event.data instanceof ArrayBuffer) {
           terminal.write(new Uint8Array(event.data));
+
           return;
         }
 
@@ -265,6 +274,7 @@ export default function TerminalPage() {
 
         if (!me.authenticated) {
           window.location.href = "/?view=sessions";
+
           return;
         }
 
@@ -326,6 +336,7 @@ export default function TerminalPage() {
 
           if (activeModifier !== null) {
             modifierRef.current = null;
+
             setModifier(null);
           }
         });
@@ -338,9 +349,14 @@ export default function TerminalPage() {
 
         window.addEventListener("resize", handleResize);
 
-        // Give Safari/iOS a small amount of time to
-        // finish the page/network transition before
-        // opening the WebSocket.
+        /*
+         * Small delay before opening
+         * the browser WebSocket.
+         *
+         * This was part of the working
+         * terminal implementation and is
+         * especially useful on iOS/Safari.
+         */
         setTimeout(() => {
           if (!disposedRef.current) {
             connectSocket();
@@ -384,9 +400,11 @@ export default function TerminalPage() {
       }
 
       terminalRef.current?.dispose();
+
       fitAddonRef.current?.dispose();
 
       terminalRef.current = null;
+
       fitAddonRef.current = null;
     };
   }, []);
@@ -394,12 +412,16 @@ export default function TerminalPage() {
   const toggleModifier = (nextModifier: Modifier) => {
     if (modifierRef.current === nextModifier) {
       modifierRef.current = null;
+
       setModifier(null);
+
       terminalRef.current?.focus();
+
       return;
     }
 
     modifierRef.current = nextModifier;
+
     setModifier(nextModifier);
 
     terminalRef.current?.focus();
@@ -423,6 +445,7 @@ export default function TerminalPage() {
 
       if (!text) {
         terminalRef.current?.focus();
+
         return;
       }
 

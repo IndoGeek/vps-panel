@@ -10,10 +10,22 @@ const hostname = process.env.HOSTNAME || "0.0.0.0";
 const port = Number(process.env.PORT || 3000);
 
 /*
- * The VPS agent listens on 127.0.0.1:8091.
+ * The VPS agent currently listens on 127.0.0.1:8091.
  *
- * BACKEND_WS_URL can still override this value when needed,
- * but 8091 is the correct default for the current agent.
+ * The browser must NOT connect directly to the backend
+ * WebSocket endpoint.
+ *
+ * Browser:
+ *
+ *   /terminal-ws
+ *
+ * Frontend proxy:
+ *
+ *   /terminal-ws
+ *        ↓
+ *   ws://127.0.0.1:8091/api/v1/tmux/connect
+ *
+ * BACKEND_WS_URL can override the backend address if required.
  */
 const backendWsUrl = process.env.BACKEND_WS_URL || "ws://127.0.0.1:8091";
 
@@ -54,22 +66,6 @@ const websocketServer = new WebSocketServer({
   perMessageDeflate: false,
 });
 
-websocketServer.on("connection", (browserSocket, request) => {
-  console.log("Terminal browser WebSocket accepted:", request.url);
-
-  browserSocket.on("close", (code, reason) => {
-    console.log(
-      "Terminal browser WebSocket closed:",
-      `code=${code}`,
-      `reason=${reason?.toString() || "<none>"}`,
-    );
-  });
-
-  browserSocket.on("error", (error) => {
-    console.error("Terminal browser WebSocket error:", error);
-  });
-});
-
 server.on("upgrade", (request, socket, head) => {
   let requestUrl;
 
@@ -79,204 +75,280 @@ server.on("upgrade", (request, socket, head) => {
     console.error("Invalid WebSocket URL:", error);
 
     socket.destroy();
+
     return;
   }
 
   /*
-   * Only handle the VPS terminal WebSocket.
+   * IMPORTANT:
    *
-   * Other WebSocket paths must not be intercepted.
+   * The browser uses /terminal-ws.
+   *
+   * This is intentionally NOT:
+   *
+   *   /api/v1/tmux/connect
+   *
+   * That path belongs to the application/backend API.
    */
-  if (requestUrl.pathname !== "/api/v1/tmux/connect") {
-    socket.destroy();
+  if (requestUrl.pathname !== "/terminal-ws") {
     return;
   }
 
   console.log("Terminal browser WebSocket upgrade:", requestUrl.pathname + requestUrl.search);
 
-  websocketServer.handleUpgrade(request, socket, head, (browserSocket) => {
-    websocketServer.emit("connection", browserSocket, request);
+  /*
+   * Connect to the Go backend first.
+   */
+  const backendUrl = new URL(backendWsUrl);
 
-    const backendUrl = new URL(backendWsUrl);
+  backendUrl.pathname = "/api/v1/tmux/connect";
+  backendUrl.search = requestUrl.search;
 
-    backendUrl.pathname = "/api/v1/tmux/connect";
-    backendUrl.search = requestUrl.search;
+  const headers = {};
 
-    const headers = {};
+  /*
+   * Forward the browser cookies to the backend.
+   *
+   * This keeps authentication available to the backend.
+   */
+  if (request.headers.cookie) {
+    headers.cookie = request.headers.cookie;
+  }
 
-    if (request.headers.cookie) {
-      headers.cookie = request.headers.cookie;
+  console.log("Connecting terminal proxy to backend:", backendUrl.toString());
+
+  const backendSocket = new WebSocket(backendUrl.toString(), {
+    headers,
+    perMessageDeflate: false,
+  });
+
+  let backendOpened = false;
+  let upgradeFinished = false;
+  let browserSocket = null;
+  let closed = false;
+
+  const destroyRawSocket = () => {
+    try {
+      socket.destroy();
+    } catch {}
+  };
+
+  const closeBackend = (code = 1000, reason = "proxy closed") => {
+    if (
+      backendSocket.readyState === WebSocket.OPEN ||
+      backendSocket.readyState === WebSocket.CONNECTING
+    ) {
+      try {
+        backendSocket.close(code, reason.slice(0, 120));
+      } catch {}
+    }
+  };
+
+  /*
+   * Backend WebSocket error.
+   */
+  backendSocket.on("error", (error) => {
+    console.error("Terminal backend WebSocket error:", error);
+
+    if (!upgradeFinished) {
+      destroyRawSocket();
+
+      return;
     }
 
-    console.log("Connecting terminal proxy to backend:", backendUrl.toString());
+    if (browserSocket) {
+      try {
+        browserSocket.close(1011, "backend websocket error");
+      } catch {}
+    }
+  });
 
-    const backendSocket = new WebSocket(backendUrl.toString(), {
-      headers,
-      perMessageDeflate: false,
-    });
+  /*
+   * Backend WebSocket closed.
+   */
+  backendSocket.on("close", (code, reason) => {
+    console.log(
+      "Terminal backend WebSocket closed:",
+      `code=${code}`,
+      `reason=${reason?.toString() || "<none>"}`,
+    );
 
-    let closed = false;
+    if (!upgradeFinished) {
+      destroyRawSocket();
 
-    const closeBoth = (reason = "proxy closed") => {
-      if (closed) {
-        return;
-      }
+      return;
+    }
 
+    if (!closed && browserSocket) {
       closed = true;
 
-      console.log("Closing terminal proxy:", reason);
-
-      if (
-        browserSocket.readyState === WebSocket.OPEN ||
-        browserSocket.readyState === WebSocket.CONNECTING
-      ) {
-        try {
-          browserSocket.close(1000, reason.slice(0, 120));
-        } catch {}
-      }
-
-      if (
-        backendSocket.readyState === WebSocket.OPEN ||
-        backendSocket.readyState === WebSocket.CONNECTING
-      ) {
-        try {
-          backendSocket.close(1000, reason.slice(0, 120));
-        } catch {}
-      }
-    };
-
-    /*
-     * Browser -> backend
-     */
-    browserSocket.on("message", (data, isBinary) => {
-      if (backendSocket.readyState !== WebSocket.OPEN) {
-        console.warn("Browser terminal message received before backend WebSocket opened.");
-
-        return;
-      }
-
       try {
-        backendSocket.send(data, {
-          binary: isBinary,
-        });
-      } catch (error) {
-        console.error("Browser -> backend terminal send failed:", error);
+        browserSocket.close(code === 1000 ? 1000 : 1011, "backend disconnected");
+      } catch {}
+    }
+  });
 
-        closeBoth("browser to backend send failed");
-      }
-    });
+  /*
+   * Backend connection succeeded.
+   *
+   * NOW accept the browser WebSocket.
+   *
+   * This is the important part of the working
+   * beb795d implementation.
+   */
+  backendSocket.on("open", () => {
+    backendOpened = true;
 
-    /*
-     * Backend -> browser
-     */
-    backendSocket.on("message", (data, isBinary) => {
-      if (browserSocket.readyState !== WebSocket.OPEN) {
-        return;
-      }
+    console.log(
+      "Terminal WebSocket connected to backend:",
+      backendUrl.pathname + backendUrl.search,
+    );
 
-      try {
-        browserSocket.send(data, {
-          binary: isBinary,
-        });
-      } catch (error) {
-        console.error("Backend -> browser terminal send failed:", error);
+    websocketServer.handleUpgrade(request, socket, head, (newBrowserSocket) => {
+      browserSocket = newBrowserSocket;
+      upgradeFinished = true;
 
-        closeBoth("backend to browser send failed");
-      }
-    });
+      websocketServer.emit("connection", browserSocket, request);
 
-    /*
-     * Backend connection successfully established.
-     */
-    backendSocket.on("open", () => {
-      console.log(
-        "Terminal WebSocket connected to backend:",
-        backendUrl.pathname + backendUrl.search,
-      );
-    });
+      console.log("Terminal browser WebSocket accepted:", request.url);
 
-    /*
-     * Backend closed the terminal.
-     */
-    backendSocket.on("close", (code, reason) => {
-      console.log(
-        "Terminal backend WebSocket closed:",
-        `code=${code}`,
-        `reason=${reason?.toString() || "<none>"}`,
-      );
+      /*
+       * Browser -> backend
+       */
+      browserSocket.on("message", (data, isBinary) => {
+        if (backendSocket.readyState !== WebSocket.OPEN) {
+          console.warn("Browser message received while backend is not open");
 
-      closeBoth(`backend closed ${code} ${reason?.toString() || ""}`.trim());
-    });
+          return;
+        }
 
-    /*
-     * Backend connection error.
-     *
-     * This is especially useful for detecting a
-     * wrong BACKEND_WS_URL or unavailable agent.
-     */
-    backendSocket.on("error", (error) => {
-      console.error("Backend terminal WebSocket error:", error);
+        try {
+          backendSocket.send(data, {
+            binary: isBinary,
+          });
+        } catch (error) {
+          console.error("Browser -> backend terminal send failed:", error);
 
-      closeBoth("backend websocket error");
-    });
+          closeBackend(1011, "browser to backend send failed");
 
-    /*
-     * Browser closed the terminal.
-     */
-    browserSocket.on("close", (code, reason) => {
-      console.log(
-        "Terminal browser socket closed:",
-        `code=${code}`,
-        `reason=${reason?.toString() || "<none>"}`,
-      );
+          try {
+            browserSocket.close(1011, "terminal proxy error");
+          } catch {}
+        }
+      });
 
-      if (!closed) {
+      /*
+       * Backend -> browser
+       */
+      backendSocket.on("message", (data, isBinary) => {
+        if (!browserSocket || browserSocket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+
+        try {
+          browserSocket.send(data, {
+            binary: isBinary,
+          });
+        } catch (error) {
+          console.error("Backend -> browser terminal send failed:", error);
+
+          try {
+            browserSocket.close(1011, "terminal proxy error");
+          } catch {}
+        }
+      });
+
+      /*
+       * Browser closed.
+       */
+      browserSocket.on("close", (code, reason) => {
+        console.log(
+          "Terminal browser WebSocket closed:",
+          `code=${code}`,
+          `reason=${reason?.toString() || "<none>"}`,
+        );
+
+        if (closed) {
+          return;
+        }
+
         closed = true;
 
-        if (
-          backendSocket.readyState === WebSocket.OPEN ||
-          backendSocket.readyState === WebSocket.CONNECTING
-        ) {
-          backendSocket.close(1000, "browser disconnected");
+        closeBackend(code, reason?.toString() || "browser disconnected");
+      });
+
+      /*
+       * Browser error.
+       */
+      browserSocket.on("error", (error) => {
+        console.error("Terminal browser WebSocket error:", error);
+
+        if (closed) {
+          return;
         }
-      }
-    });
 
-    browserSocket.on("error", (error) => {
-      console.error("Browser terminal WebSocket error:", error);
+        closed = true;
 
-      closeBoth("browser websocket error");
-    });
+        closeBackend(1011, "browser websocket error");
+      });
 
-    /*
-     * Keep the internal connection alive.
-     */
-    const heartbeat = setInterval(() => {
-      if (closed) {
-        clearInterval(heartbeat);
-        return;
-      }
-
-      if (backendSocket.readyState === WebSocket.OPEN) {
-        try {
-          backendSocket.ping();
-        } catch (error) {
-          console.error("Backend terminal ping failed:", error);
-
+      /*
+       * Backend heartbeat.
+       */
+      const heartbeat = setInterval(() => {
+        if (closed) {
           clearInterval(heartbeat);
 
-          closeBoth("backend ping failed");
+          return;
         }
-      }
-    }, 30000);
 
-    const cleanupHeartbeat = () => {
-      clearInterval(heartbeat);
-    };
+        if (backendSocket.readyState === WebSocket.OPEN) {
+          try {
+            backendSocket.ping();
+          } catch (error) {
+            console.error("Backend terminal ping failed:", error);
 
-    browserSocket.once("close", cleanupHeartbeat);
+            clearInterval(heartbeat);
 
-    backendSocket.once("close", cleanupHeartbeat);
+            try {
+              browserSocket.close(1011, "backend ping failed");
+            } catch {}
+
+            closeBackend(1011, "backend ping failed");
+          }
+        }
+      }, 30000);
+
+      browserSocket.once("close", () => {
+        clearInterval(heartbeat);
+      });
+
+      backendSocket.once("close", () => {
+        clearInterval(heartbeat);
+      });
+    });
+  });
+
+  /*
+   * Do not leave the HTTP upgrade hanging forever
+   * if the backend cannot connect.
+   */
+  const upgradeTimeout = setTimeout(() => {
+    if (!backendOpened && !upgradeFinished) {
+      console.error("Terminal backend WebSocket connection timeout:", backendUrl.toString());
+
+      closeBackend(1013, "backend connection timeout");
+
+      destroyRawSocket();
+    }
+  }, 10000);
+
+  backendSocket.once("open", () => {
+    clearTimeout(upgradeTimeout);
+  });
+
+  backendSocket.once("close", () => {
+    clearTimeout(upgradeTimeout);
   });
 });
 
