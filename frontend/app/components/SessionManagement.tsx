@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   createTmuxSession,
   deleteTmuxSession,
@@ -129,42 +129,127 @@ function TrashIcon() {
   );
 }
 
+type MenuPosition = {
+  top: number;
+  left: number;
+};
+
 function SessionMenu({
   session,
-  onOpen,
   onRename,
   onDetach,
   onDelete,
 }: {
   session: SessionInfo;
-  onOpen: () => void;
   onRename: () => void;
   onDetach: () => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<MenuPosition | null>(null);
+
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  const MENU_WIDTH = 180;
+  const MENU_HEIGHT = 150;
+  const VIEWPORT_PADDING = 8;
+  const MENU_GAP = 8;
+
+  const updatePosition = useCallback(() => {
+    if (!buttonRef.current) {
+      return;
+    }
+
+    const rect = buttonRef.current.getBoundingClientRect();
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    let left = rect.right - MENU_WIDTH;
+
+    if (left < VIEWPORT_PADDING) {
+      left = VIEWPORT_PADDING;
+    }
+
+    if (left + MENU_WIDTH > viewportWidth - VIEWPORT_PADDING) {
+      left = viewportWidth - MENU_WIDTH - VIEWPORT_PADDING;
+    }
+
+    let top = rect.bottom + MENU_GAP;
+
+    if (top + MENU_HEIGHT > viewportHeight - VIEWPORT_PADDING) {
+      top = rect.top - MENU_HEIGHT - MENU_GAP;
+    }
+
+    if (top < VIEWPORT_PADDING) {
+      top = VIEWPORT_PADDING;
+    }
+
+    setPosition({
+      top,
+      left,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+
+    updatePosition();
+
+    const handleResize = () => {
+      updatePosition();
+    };
+
+    const handleScroll = () => {
+      updatePosition();
+    };
+
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("scroll", handleScroll, true);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [open, updatePosition]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    const close = () => setOpen(false);
+    const handlePointerDown = () => {
+      setOpen(false);
+    };
 
-    window.addEventListener("click", close);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener("click", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      window.removeEventListener("click", close);
+      window.removeEventListener("click", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [open]);
 
   return (
-    <div className="relative">
+    <>
       <button
+        ref={buttonRef}
         type="button"
         aria-label={`Actions for ${session.name}`}
+        aria-expanded={open}
         onClick={(event) => {
           event.stopPropagation();
+
           setOpen((current) => !current);
         }}
         className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 active:scale-95"
@@ -172,23 +257,17 @@ function SessionMenu({
         <MoreIcon />
       </button>
 
-      {open && (
+      {open && position && (
         <div
-          className="absolute right-0 top-11 z-50 min-w-[170px] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 p-1 shadow-2xl"
-          onClick={(event) => event.stopPropagation()}
+          className="fixed z-[10010] w-[180px] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 p-1 shadow-2xl"
+          style={{
+            top: position.top,
+            left: position.left,
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
         >
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onOpen();
-            }}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
-          >
-            <TerminalIcon />
-            Open terminal
-          </button>
-
           <button
             type="button"
             onClick={() => {
@@ -233,7 +312,7 @@ function SessionMenu({
           </button>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -278,7 +357,7 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
         return;
       }
 
-      setError("Unable to load tmux sessions.");
+      setError(err instanceof Error ? err.message : "Unable to load tmux sessions.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -514,7 +593,6 @@ export default function SessionManagement({ onOpenTerminal }: SessionManagementP
 
                     <SessionMenu
                       session={session}
-                      onOpen={() => onOpenTerminal(session.name)}
                       onRename={() => {
                         setRenameSession(session);
                         setRenameValue(session.name);

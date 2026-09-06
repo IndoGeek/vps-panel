@@ -4,6 +4,7 @@ const BACKEND_URL = process.env.BACKEND_URL ?? "http://127.0.0.1:8090";
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
+
   const target = `${BACKEND_URL}/api/${path.join("/")}`;
 
   const response = await fetch(target, {
@@ -25,3 +26,5 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
 
 export const GET = proxy;
 export const POST = proxy;
+export const PATCH = proxy;
+export const DELETE = proxy;
