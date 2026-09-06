@@ -9,6 +9,9 @@ type Config struct {
 	AuthUsername     string
 	AuthPasswordHash string
 	AuthLinuxUser    string
+
+	DatabaseDSN string
+	AgentURL    string
 }
 
 func Load() Config {
@@ -24,11 +27,21 @@ func Load() Config {
 		port = "8090"
 	}
 
+	agentURL := os.Getenv("VPS_PANEL_AGENT_URL")
+
+	if agentURL == "" {
+		agentURL = "http://127.0.0.1:8091"
+	}
+
 	return Config{
-		Host:             host,
-		Port:             port,
+		Host: host,
+		Port: port,
+
 		AuthUsername:     os.Getenv("VPS_PANEL_AUTH_USERNAME"),
 		AuthPasswordHash: os.Getenv("VPS_PANEL_AUTH_PASSWORD_HASH"),
 		AuthLinuxUser:    os.Getenv("VPS_PANEL_AUTH_LINUX_USER"),
+
+		DatabaseDSN: os.Getenv("VPS_PANEL_DB_DSN"),
+		AgentURL:    agentURL,
 	}
 }

@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tanmay/vps-panel/backend/internal/audit"
 	"github.com/tanmay/vps-panel/backend/internal/auth"
 	"github.com/tanmay/vps-panel/backend/internal/config"
+	"github.com/tanmay/vps-panel/backend/internal/database"
 	api "github.com/tanmay/vps-panel/backend/internal/http"
 )
 
@@ -22,19 +24,47 @@ func main() {
 		SessionTTL:   12 * time.Hour,
 	})
 	if err != nil {
-		log.Fatalf("authentication initialization failed: %v", err)
+		log.Fatalf(
+			"authentication initialization failed: %v",
+			err,
+		)
 	}
 
-	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
+	db, err := database.Open(
+		cfg.DatabaseDSN,
+	)
+	if err != nil {
+		log.Fatalf(
+			"database initialization failed: %v",
+			err,
+		)
+	}
 
-	router := api.NewRouter(authService)
+	defer db.Close()
+
+	auditStore := audit.NewStore(db)
+
+	addr := fmt.Sprintf(
+		"%s:%s",
+		cfg.Host,
+		cfg.Port,
+	)
+
+	router := api.NewRouter(
+		authService,
+		auditStore,
+		cfg.AgentURL,
+	)
 
 	server := &http.Server{
 		Addr:    addr,
 		Handler: router,
 	}
 
-	log.Printf("VPS Panel backend starting on %s", addr)
+	log.Printf(
+		"VPS Panel backend starting on %s",
+		addr,
+	)
 
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)

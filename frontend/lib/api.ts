@@ -9,31 +9,6 @@ export type SystemInfo = {
   kernel: string;
 };
 
-export type SystemMetrics = {
-  cpu_percent: number;
-
-  memory_percent: number;
-  memory_used_bytes: number;
-  memory_total_bytes: number;
-
-  swap_percent: number;
-  swap_used_bytes: number;
-  swap_total_bytes: number;
-
-  disk_percent: number;
-  disk_used_bytes: number;
-  disk_total_bytes: number;
-
-  load_1: number;
-  load_5: number;
-  load_15: number;
-
-  uptime_seconds: number;
-
-  network_rx_bytes: number;
-  network_tx_bytes: number;
-};
-
 export type UserInfo = {
   username: string;
   uid: number;
@@ -65,7 +40,6 @@ export type ServiceInfo = {
 
 export type Snapshot = {
   System: SystemInfo;
-  Metrics: SystemMetrics;
   Users: UserInfo[];
   Sessions: SessionInfo[];
   Processes: ProcessInfo[];
@@ -128,4 +102,65 @@ export async function logout(): Promise<void> {
   if (!response.ok) {
     throw new Error(`Logout failed: ${response.status}`);
   }
+}
+
+export type AuditEntry = {
+  id: number;
+  created_at: string;
+  username: string;
+  action: string;
+  resource_type: string;
+  resource_name: string;
+  status: string;
+  ip_address: string;
+  user_agent: string;
+  details: string;
+};
+
+export type AuditResponse = {
+  entries: AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export async function getAuditLogs({
+  limit = 50,
+  offset = 0,
+  action = "",
+  status = "",
+}: {
+  limit?: number;
+  offset?: number;
+  action?: string;
+  status?: string;
+} = {}): Promise<AuditResponse> {
+  const params = new URLSearchParams();
+
+  params.set("limit", String(limit));
+
+  params.set("offset", String(offset));
+
+  if (action) {
+    params.set("action", action);
+  }
+
+  if (status) {
+    params.set("status", status);
+  }
+
+  const response = await fetch(`/api/v1/audit?${params.toString()}`, {
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    throw new Error("UNAUTHORIZED");
+  }
+
+  if (!response.ok) {
+    throw new Error(`Audit request failed: ${response.status}`);
+  }
+
+  return response.json();
 }
