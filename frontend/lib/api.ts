@@ -86,7 +86,14 @@ export async function getSnapshot(): Promise<Snapshot> {
   const baseUrl =
     typeof window === "undefined" ? (process.env.BACKEND_API_URL ?? "http://127.0.0.1:8090") : "";
 
-  const response = await fetch(`${baseUrl}/api/v1/snapshot`);
+  const response = await fetch(`${baseUrl}/api/v1/snapshot`, {
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    throw new Error("UNAUTHORIZED");
+  }
 
   if (!response.ok) {
     throw new Error(`Snapshot request failed: ${response.status}`);
@@ -164,7 +171,6 @@ export async function getAuditLogs({
   const params = new URLSearchParams();
 
   params.set("limit", String(limit));
-
   params.set("offset", String(offset));
 
   if (action) {
@@ -189,4 +195,180 @@ export async function getAuditLogs({
   }
 
   return response.json();
+}
+
+/*
+ * --------------------------------------------------------------------------
+ * Tmux session management
+ * --------------------------------------------------------------------------
+ *
+ * These functions talk only to the authenticated session-management API.
+ *
+ * The interactive terminal WebSocket/PTY implementation is completely
+ * separate and is intentionally not touched by these functions.
+ */
+
+type SessionListResponse = {
+  sessions: SessionInfo[];
+};
+
+type SessionCreateResponse = {
+  session: string;
+  success: boolean;
+};
+
+type SessionOperationResponse = {
+  success: boolean;
+  session?: string;
+  sessions?: string[];
+};
+
+type SessionOperationResult = {
+  name: string;
+  success: boolean;
+  error?: string;
+};
+
+type SessionDeleteResponse = {
+  success: boolean;
+  deleted: number;
+  failed: number;
+  results: SessionOperationResult[];
+};
+
+async function tmuxRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
+    ...options,
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      ...(options.body
+        ? {
+            "Content-Type": "application/json",
+          }
+        : {}),
+      ...(options.headers ?? {}),
+    },
+  });
+
+  if (response.status === 401) {
+    throw new Error("UNAUTHORIZED");
+  }
+
+  if (!response.ok) {
+    let message = `Tmux request failed: ${response.status}`;
+
+    try {
+      const text = await response.text();
+
+      if (text.trim()) {
+        message = text.trim();
+      }
+    } catch {
+      // Keep the default error message.
+    }
+
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json();
+}
+
+export async function getTmuxSessions(): Promise<SessionInfo[]> {
+  const result = await tmuxRequest<SessionListResponse>("/api/v1/tmux/sessions", {
+    method: "GET",
+  });
+
+  return Array.isArray(result.sessions) ? result.sessions : [];
+}
+
+export async function createTmuxSession(name: string): Promise<SessionCreateResponse> {
+  const trimmedName = name.trim();
+
+  if (!trimmedName) {
+    throw new Error("Session name is required.");
+  }
+
+  return tmuxRequest<SessionCreateResponse>("/api/v1/tmux/sessions", {
+    method: "POST",
+    body: JSON.stringify({
+      name: trimmedName,
+    }),
+  });
+}
+
+export async function renameTmuxSession(
+  currentName: string,
+  newName: string,
+): Promise<SessionOperationResponse> {
+  const trimmedCurrentName = currentName.trim();
+  const trimmedNewName = newName.trim();
+
+  if (!trimmedCurrentName) {
+    throw new Error("Current session name is required.");
+  }
+
+  if (!trimmedNewName) {
+    throw new Error("New session name is required.");
+  }
+
+  return tmuxRequest<SessionOperationResponse>(
+    `/api/v1/tmux/sessions/${encodeURIComponent(trimmedCurrentName)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: trimmedNewName,
+      }),
+    },
+  );
+}
+
+export async function detachTmuxSession(name: string): Promise<SessionOperationResponse> {
+  const trimmedName = name.trim();
+
+  if (!trimmedName) {
+    throw new Error("Session name is required.");
+  }
+
+  return tmuxRequest<SessionOperationResponse>(
+    `/api/v1/tmux/sessions/${encodeURIComponent(trimmedName)}/detach`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function deleteTmuxSession(name: string): Promise<SessionDeleteResponse> {
+  const trimmedName = name.trim();
+
+  if (!trimmedName) {
+    throw new Error("Session name is required.");
+  }
+
+  return tmuxRequest<SessionDeleteResponse>("/api/v1/tmux/sessions", {
+    method: "DELETE",
+    body: JSON.stringify({
+      names: [trimmedName],
+    }),
+  });
+}
+
+export async function deleteTmuxSessions(names: string[]): Promise<SessionDeleteResponse> {
+  const cleanedNames = Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)));
+
+  if (cleanedNames.length === 0) {
+    throw new Error("At least one session name is required.");
+  }
+
+  return tmuxRequest<SessionDeleteResponse>("/api/v1/tmux/sessions", {
+    method: "DELETE",
+    body: JSON.stringify({
+      names: cleanedNames,
+    }),
+  });
 }

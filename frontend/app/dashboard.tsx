@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getAuditLogs, getSnapshot, logout, type AuditEntry, type UserInfo } from "@/lib/api";
+import SessionManagement from "@/app/components/SessionManagement";
 
 type Snapshot = Awaited<ReturnType<typeof getSnapshot>>;
 
@@ -912,77 +913,7 @@ export default function Dashboard({
           </section>
         )}
 
-        {view === "sessions" && (
-          <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-            <div className="border-b border-zinc-800 p-5 sm:p-6">
-              <h2 className="text-lg font-semibold">Tmux Sessions</h2>
-
-              <p className="mt-1 text-sm text-zinc-500">
-                {snapshot.Sessions.length} tmux{" "}
-                {snapshot.Sessions.length === 1 ? "session" : "sessions"}
-              </p>
-            </div>
-
-            {snapshot.Sessions.length === 0 ? (
-              <div className="p-8 text-center">
-                <p className="text-sm text-zinc-400">No tmux sessions found.</p>
-
-                <p className="mt-2 text-xs text-zinc-600">
-                  Create a tmux session on the server and refresh the panel.
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-zinc-800">
-                {snapshot.Sessions.map((session) => (
-                  <button
-                    key={session.name}
-                    type="button"
-                    onClick={() => openTerminal(session.name)}
-                    className="block w-full p-5 text-left transition hover:bg-zinc-800/40 active:bg-zinc-800/60"
-                    style={{
-                      WebkitTapHighlightColor: "transparent",
-                      touchAction: "manipulation",
-                    }}
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`h-2 w-2 rounded-full ${
-                              session.attached ? "bg-green-400" : "bg-zinc-600"
-                            }`}
-                          />
-
-                          <p className="truncate font-mono text-sm font-medium text-zinc-200">
-                            {session.name}
-                          </p>
-                        </div>
-
-                        <p className="mt-2 text-xs text-zinc-500">
-                          {session.windows} {session.windows === 1 ? "window" : "windows"}
-                        </p>
-                      </div>
-
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs ${
-                            session.attached
-                              ? "bg-green-400/10 text-green-400"
-                              : "bg-zinc-800 text-zinc-500"
-                          }`}
-                        >
-                          {session.attached ? "Attached" : "Detached"}
-                        </span>
-
-                        <span className="text-zinc-600">→</span>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+        {view === "sessions" && <SessionManagement onOpenTerminal={openTerminal} />}
 
         {view === "services" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
