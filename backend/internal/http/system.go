@@ -22,8 +22,20 @@ func NewRouterWithSystem(
 		agentURL,
 	)
 
-	return systemPowerWrapper(
+	/*
+		Management is placed behind the authenticated backend
+		before the system-power wrapper.
+	*/
+
+	managementRouter := managementWrapper(
 		baseRouter,
+		authService,
+		auditStore,
+		agentURL,
+	)
+
+	return systemPowerWrapper(
+		managementRouter,
 		authService,
 		auditStore,
 		agentURL,
@@ -97,7 +109,8 @@ func handleSystemPower(
 		return
 	}
 
-	if action != "reboot" && action != "shutdown" {
+	if action != "reboot" &&
+		action != "shutdown" {
 		http.Error(
 			w,
 			"invalid system action",
@@ -173,7 +186,9 @@ func requestAgentPower(
 		"/",
 	)
 
-	url := baseURL + "/api/v1/system/" + action
+	url := baseURL +
+		"/api/v1/system/" +
+		action
 
 	request, err := http.NewRequest(
 		http.MethodPost,
@@ -189,7 +204,9 @@ func requestAgentPower(
 		"application/json",
 	)
 
-	response, err := http.DefaultClient.Do(request)
+	response, err := http.DefaultClient.Do(
+		request,
+	)
 	if err != nil {
 		return err
 	}
@@ -199,7 +216,9 @@ func requestAgentPower(
 	if response.StatusCode < 200 ||
 		response.StatusCode >= 300 {
 
-		body, _ := io.ReadAll(response.Body)
+		body, _ := io.ReadAll(
+			response.Body,
+		)
 
 		message := strings.TrimSpace(
 			string(body),

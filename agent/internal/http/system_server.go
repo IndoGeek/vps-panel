@@ -10,10 +10,8 @@ func (s *Server) ListenAndServeWithSystem() error {
 
 	/*
 		Existing agent endpoints.
-
-		The interactive tmux WebSocket/PTY handler remains
-		exactly the same implementation.
 	*/
+
 	mux.HandleFunc(
 		"/api/v1/snapshot",
 		s.handleSnapshot,
@@ -35,9 +33,16 @@ func (s *Server) ListenAndServeWithSystem() error {
 	)
 
 	/*
-		New Phase 9.1 system-management endpoints.
+		Phase 9.1 system-management endpoints.
 	*/
+
 	registerSystemRoutes(mux)
+
+	/*
+		Phase 9.2 + 9.3 service/process management.
+	*/
+
+	registerManagementRoutes(mux)
 
 	log.Printf(
 		"VPS Panel agent API starting on %s",

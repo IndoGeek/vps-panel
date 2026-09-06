@@ -1,108 +1,172 @@
 package process
 
 import (
+	"fmt"
 	"os"
-	"path/filepath"
+	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 type Process struct {
-	PID     int    `json:"pid"`
-	PPID    int    `json:"ppid"`
-	UID     int    `json:"uid"`
-	State   string `json:"state"`
-	Command string `json:"command"`
+	PID           int     `json:"pid"`
+	PPID          int     `json:"ppid"`
+	UID           int     `json:"uid"`
+	User          string  `json:"user"`
+	State         string  `json:"state"`
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemoryPercent float64 `json:"memory_percent"`
+	MemoryBytes   uint64  `json:"memory_bytes"`
+	Command       string  `json:"command"`
 }
 
 func ListProcesses() ([]Process, error) {
-	entries, err := os.ReadDir("/proc")
+	command := exec.Command(
+		"ps",
+		"-eo",
+		"pid=,ppid=,uid=,user=,state=,pcpu=,pmem=,rss=,args=",
+		"--sort=-pcpu",
+	)
+
+	output, err := command.Output()
 	if err != nil {
 		return nil, err
 	}
 
 	var processes []Process
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	for _, line := range strings.Split(
+		string(output),
+		"\n",
+	) {
+		fields := strings.Fields(line)
+
+		if len(fields) < 8 {
 			continue
 		}
 
-		pid, err := strconv.Atoi(entry.Name())
+		pid, err := strconv.Atoi(fields[0])
 		if err != nil {
 			continue
 		}
 
-		process, err := readProcess(pid)
+		ppid, err := strconv.Atoi(fields[1])
 		if err != nil {
-			// Processes can disappear while we're scanning /proc.
 			continue
 		}
 
-		processes = append(processes, process)
+		uid, err := strconv.Atoi(fields[2])
+		if err != nil {
+			continue
+		}
+
+		cpuPercent, err := strconv.ParseFloat(
+			fields[5],
+			64,
+		)
+		if err != nil {
+			cpuPercent = 0
+		}
+
+		memoryPercent, err := strconv.ParseFloat(
+			fields[6],
+			64,
+		)
+		if err != nil {
+			memoryPercent = 0
+		}
+
+		rssKiB, err := strconv.ParseUint(
+			fields[7],
+			10,
+			64,
+		)
+		if err != nil {
+			rssKiB = 0
+		}
+
+		commandText := strings.TrimSpace(
+			strings.Join(
+				fields[8:],
+				" ",
+			),
+		)
+
+		if commandText == "" {
+			commandText = "[unknown]"
+		}
+
+		processes = append(
+			processes,
+			Process{
+				PID:           pid,
+				PPID:          ppid,
+				UID:           uid,
+				User:          fields[3],
+				State:         fields[4],
+				CPUPercent:    cpuPercent,
+				MemoryPercent: memoryPercent,
+				MemoryBytes:   rssKiB * 1024,
+				Command:       commandText,
+			},
+		)
 	}
 
 	return processes, nil
 }
 
-func readProcess(pid int) (Process, error) {
-	statusPath := filepath.Join("/proc", strconv.Itoa(pid), "status")
+func KillProcess(
+	pid int,
+	signalName string,
+) error {
+	if pid <= 1 {
+		return fmt.Errorf(
+			"refusing to kill protected PID %d",
+			pid,
+		)
+	}
 
-	data, err := os.ReadFile(statusPath)
+	if pid == os.Getpid() {
+		return fmt.Errorf(
+			"refusing to kill the VPS Panel agent",
+		)
+	}
+
+	var signal os.Signal
+
+	switch strings.ToUpper(
+		strings.TrimSpace(signalName),
+	) {
+	case "", "TERM", "SIGTERM":
+		signal = syscall.SIGTERM
+
+	case "KILL", "SIGKILL":
+		signal = syscall.SIGKILL
+
+	default:
+		return fmt.Errorf(
+			"unsupported process signal: %s",
+			signalName,
+		)
+	}
+
+	target, err := os.FindProcess(pid)
 	if err != nil {
-		return Process{}, err
+		return fmt.Errorf(
+			"find process %d: %w",
+			pid,
+			err,
+		)
 	}
 
-	values := make(map[string]string)
-
-	for _, line := range strings.Split(string(data), "\n") {
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := parts[0]
-		value := strings.TrimSpace(parts[1])
-
-		values[key] = value
+	if err := target.Signal(signal); err != nil {
+		return fmt.Errorf(
+			"signal process %d failed: %w",
+			pid,
+			err,
+		)
 	}
 
-	ppid, err := strconv.Atoi(values["PPid"])
-	if err != nil {
-		return Process{}, err
-	}
-
-	uidParts := strings.Fields(values["Uid"])
-	if len(uidParts) == 0 {
-		return Process{}, strconv.ErrSyntax
-	}
-
-	uid, err := strconv.Atoi(uidParts[0])
-	if err != nil {
-		return Process{}, err
-	}
-
-	state := values["State"]
-
-	commandData, err := os.ReadFile(
-		filepath.Join("/proc", strconv.Itoa(pid), "cmdline"),
-	)
-	if err != nil {
-		return Process{}, err
-	}
-
-	command := strings.ReplaceAll(string(commandData), "\x00", " ")
-	command = strings.TrimSpace(command)
-
-	if command == "" {
-		command = values["Name"]
-	}
-
-	return Process{
-		PID:     pid,
-		PPID:    ppid,
-		UID:     uid,
-		State:   state,
-		Command: command,
-	}, nil
+	return nil
 }

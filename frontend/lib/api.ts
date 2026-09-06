@@ -52,7 +52,11 @@ export type ProcessInfo = {
   pid: number;
   ppid: number;
   uid: number;
+  user?: string;
   state: string;
+  cpu_percent?: number;
+  memory_percent?: number;
+  memory_bytes?: number;
   command: string;
 };
 
@@ -201,11 +205,6 @@ export async function getAuditLogs({
  * --------------------------------------------------------------------------
  * Tmux session management
  * --------------------------------------------------------------------------
- *
- * These functions talk only to the authenticated session-management API.
- *
- * The interactive terminal WebSocket/PTY implementation is completely
- * separate and is intentionally not touched by these functions.
  */
 
 type SessionListResponse = {
@@ -243,11 +242,13 @@ async function tmuxRequest<T>(path: string, options: RequestInit = {}): Promise<
     cache: "no-store",
     headers: {
       Accept: "application/json",
+
       ...(options.body
         ? {
             "Content-Type": "application/json",
           }
         : {}),
+
       ...(options.headers ?? {}),
     },
   });
@@ -266,7 +267,7 @@ async function tmuxRequest<T>(path: string, options: RequestInit = {}): Promise<
         message = text.trim();
       }
     } catch {
-      // Keep the default error message.
+      // Keep default message.
     }
 
     throw new Error(message);
@@ -307,6 +308,7 @@ export async function renameTmuxSession(
   newName: string,
 ): Promise<SessionOperationResponse> {
   const trimmedCurrentName = currentName.trim();
+
   const trimmedNewName = newName.trim();
 
   if (!trimmedCurrentName) {
@@ -373,6 +375,12 @@ export async function deleteTmuxSessions(names: string[]): Promise<SessionDelete
   });
 }
 
+/*
+ * --------------------------------------------------------------------------
+ * System power management
+ * --------------------------------------------------------------------------
+ */
+
 export type SystemPowerAction = "reboot" | "shutdown";
 
 export type SystemPowerResponse = {
@@ -400,7 +408,7 @@ export async function requestSystemPower(action: SystemPowerAction): Promise<Sys
   try {
     body = await response.json();
   } catch {
-    // Keep the HTTP status as the useful error.
+    // Keep HTTP status as useful error.
   }
 
   if (!response.ok) {
@@ -412,4 +420,133 @@ export async function requestSystemPower(action: SystemPowerAction): Promise<Sys
   }
 
   return body as SystemPowerResponse;
+}
+
+/*
+ * --------------------------------------------------------------------------
+ * Service / process management
+ * --------------------------------------------------------------------------
+ */
+
+export type ServiceAction = "start" | "stop" | "restart" | "enable" | "disable";
+
+export type ServiceActionResponse = {
+  success: boolean;
+  service: string;
+  action: ServiceAction;
+};
+
+export type ProcessKillSignal = "TERM" | "KILL";
+
+export type ProcessKillResponse = {
+  success: boolean;
+  pid: number;
+  signal: string;
+};
+
+async function managementRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
+    ...options,
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+
+      ...(options.body
+        ? {
+            "Content-Type": "application/json",
+          }
+        : {}),
+
+      ...(options.headers ?? {}),
+    },
+  });
+
+  if (response.status === 401) {
+    throw new Error("UNAUTHORIZED");
+  }
+
+  if (!response.ok) {
+    let message = `Management request failed: ${response.status}`;
+
+    try {
+      const body = await response.json();
+
+      if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+        message = body.error;
+      }
+    } catch {
+      try {
+        const text = await response.text();
+
+        if (text.trim()) {
+          message = text.trim();
+        }
+      } catch {
+        // Keep default message.
+      }
+    }
+
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json();
+}
+
+export async function getServices(): Promise<ServiceInfo[]> {
+  const result = await managementRequest<{
+    services: ServiceInfo[];
+  }>("/api/v1/services", {
+    method: "GET",
+  });
+
+  return Array.isArray(result.services) ? result.services : [];
+}
+
+export async function manageService(
+  name: string,
+  action: ServiceAction,
+): Promise<ServiceActionResponse> {
+  const trimmedName = name.trim();
+
+  if (!trimmedName) {
+    throw new Error("Service name is required.");
+  }
+
+  return managementRequest<ServiceActionResponse>(
+    `/api/v1/services/${encodeURIComponent(trimmedName)}/${action}`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function getProcesses(): Promise<ProcessInfo[]> {
+  const result = await managementRequest<{
+    processes: ProcessInfo[];
+  }>("/api/v1/processes", {
+    method: "GET",
+  });
+
+  return Array.isArray(result.processes) ? result.processes : [];
+}
+
+export async function killProcess(
+  pid: number,
+  signal: ProcessKillSignal = "TERM",
+): Promise<ProcessKillResponse> {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error("Invalid process PID.");
+  }
+
+  return managementRequest<ProcessKillResponse>(`/api/v1/processes/${pid}/kill`, {
+    method: "POST",
+    body: JSON.stringify({
+      signal,
+    }),
+  });
 }

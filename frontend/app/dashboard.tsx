@@ -6,6 +6,8 @@ import { getAuditLogs, getSnapshot, logout, type AuditEntry, type UserInfo } fro
 
 import SessionManagement from "@/app/components/SessionManagement";
 
+import ServiceProcessManagement from "@/app/components/ServiceProcessManagement";
+
 import SystemManagement, {
   SystemPowerControls,
   SystemResourceGrid,
@@ -35,124 +37,6 @@ function formatBytes(bytes: number) {
   }
 
   return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unit]}`;
-}
-
-function ActivityIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <path d="M3 12h4l2-6 4 12 2-6h6" />
-    </svg>
-  );
-}
-
-function ServiceIcon({ name }: { name: string }) {
-  const lower = name.toLowerCase();
-
-  if (
-    lower.includes("nginx") ||
-    lower.includes("apache") ||
-    lower.includes("caddy") ||
-    lower.includes("traefik")
-  ) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      >
-        <path d="M6 4h12l2 4-8 12L4 8z" />
-        <path d="M8 8h8M9 12h6M10 16h4" />
-      </svg>
-    );
-  }
-
-  if (lower.includes("redis") || lower.includes("memcached")) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      >
-        <ellipse cx="12" cy="6" rx="7" ry="3" />
-        <path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6" />
-        <path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
-      </svg>
-    );
-  }
-
-  if (
-    lower.includes("mysql") ||
-    lower.includes("mariadb") ||
-    lower.includes("postgres") ||
-    lower.includes("mongodb")
-  ) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      >
-        <ellipse cx="12" cy="5" rx="7" ry="3" />
-        <path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
-        <path d="M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7" />
-      </svg>
-    );
-  }
-
-  if (lower.includes("ssh") || lower.includes("sshd")) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      >
-        <rect x="3" y="5" width="18" height="14" rx="2" />
-        <path d="m7 10 3 2-3 2M12 15h5" />
-      </svg>
-    );
-  }
-
-  if (lower.includes("docker") || lower.includes("containerd")) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      >
-        <path d="M3 13h14M5 10h3M9 10h3M13 10h3M7 7h3M11 7h3" />
-        <path d="M18 11c2 0 3 1 3 2.5 0 1.8-2 3.5-5 3.5H7c-2 0-3-1-3-3" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <circle cx="12" cy="12" r="8" />
-      <path d="M12 8v4l3 2" />
-    </svg>
-  );
 }
 
 function DashboardActionButton({
@@ -226,11 +110,10 @@ export default function Dashboard({
   }, []);
 
   /*
-   * Keep the existing live snapshot refresh.
+   * Keep the live snapshot refresh.
    *
-   * The old dashboard metric-history/sparkline state has deliberately been
-   * removed. The Dashboard now renders the same live resource cards used by
-   * SystemManagement.
+   * Dashboard intentionally uses the same resource
+   * cards as SystemManagement.
    */
   useEffect(() => {
     setLastUpdated(new Date());
@@ -279,6 +162,7 @@ export default function Dashboard({
         }
 
         setAuditEntries(result.entries);
+
         setAuditTotal(result.total);
       } catch (error) {
         if (cancelled) {
@@ -322,6 +206,7 @@ export default function Dashboard({
         });
 
         setAuditEntries(result.entries);
+
         setAuditTotal(result.total);
       } catch (error) {
         console.error("Failed to refresh audit logs:", error);
@@ -531,27 +416,13 @@ export default function Dashboard({
 
         {view === "dashboard" && (
           <>
-            {/* ------------------------------------------------------------
-             * Current VPS resource utilization
-             * ------------------------------------------------------------ */}
-
             <SystemResourceGrid snapshot={snapshot} />
-
-            {/* ------------------------------------------------------------
-             * Power controls
-             * ------------------------------------------------------------ */}
 
             <div className="mt-6">
               <SystemPowerControls />
             </div>
 
-            {/* ------------------------------------------------------------
-             * Quick management cards
-             * ------------------------------------------------------------ */}
-
             <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {/* Services */}
-
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
@@ -570,8 +441,6 @@ export default function Dashboard({
                 </div>
               </section>
 
-              {/* Processes */}
-
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
@@ -585,8 +454,6 @@ export default function Dashboard({
                   </DashboardActionButton>
                 </div>
               </section>
-
-              {/* Tmux */}
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <div className="flex items-start justify-between gap-4">
@@ -602,38 +469,30 @@ export default function Dashboard({
                 </div>
               </section>
 
-              {/* Network */}
-
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm text-zinc-500">Network</p>
+                <div>
+                  <p className="text-sm text-zinc-500">Network</p>
 
-                    <div className="mt-4 space-y-3">
-                      <div>
-                        <p className="text-xs text-zinc-600">Received</p>
+                  <div className="mt-4 space-y-3">
+                    <div>
+                      <p className="text-xs text-zinc-600">Received</p>
 
-                        <p className="mt-1 text-sm font-medium">
-                          {formatBytes(snapshot.Metrics.network_rx_bytes)}
-                        </p>
-                      </div>
+                      <p className="mt-1 text-sm font-medium">
+                        {formatBytes(snapshot.Metrics.network_rx_bytes)}
+                      </p>
+                    </div>
 
-                      <div>
-                        <p className="text-xs text-zinc-600">Transmitted</p>
+                    <div>
+                      <p className="text-xs text-zinc-600">Transmitted</p>
 
-                        <p className="mt-1 text-sm font-medium">
-                          {formatBytes(snapshot.Metrics.network_tx_bytes)}
-                        </p>
-                      </div>
+                      <p className="mt-1 text-sm font-medium">
+                        {formatBytes(snapshot.Metrics.network_tx_bytes)}
+                      </p>
                     </div>
                   </div>
                 </div>
               </section>
             </section>
-
-            {/* ------------------------------------------------------------
-             * Compact system information
-             * ------------------------------------------------------------ */}
 
             <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -679,135 +538,11 @@ export default function Dashboard({
           </>
         )}
 
-        {/* --------------------------------------------------------------
-         * Processes
-         * -------------------------------------------------------------- */}
-
-        {view === "processes" && (
-          <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-            <div className="border-b border-zinc-800 p-5 sm:p-6">
-              <h2 className="text-lg font-semibold">Processes</h2>
-
-              <p className="mt-1 text-sm text-zinc-500">
-                {snapshot.Processes.length} running processes
-              </p>
-            </div>
-
-            <div className="divide-y divide-zinc-800">
-              {snapshot.Processes.map((process) => (
-                <div key={process.pid} className="p-4 transition hover:bg-zinc-800/40 sm:p-5">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="truncate font-mono text-sm text-zinc-200">{process.command}</p>
-
-                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
-                        <span className="rounded-full bg-zinc-800 px-2.5 py-1">
-                          PID {process.pid}
-                        </span>
-
-                        <span className="rounded-full bg-zinc-800 px-2.5 py-1">
-                          PPID {process.ppid}
-                        </span>
-
-                        <span className="rounded-full bg-zinc-800 px-2.5 py-1">
-                          UID {process.uid}
-                        </span>
-                      </div>
-                    </div>
-
-                    <span className="w-fit rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-400">
-                      {process.state}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* --------------------------------------------------------------
-         * Sessions
-         * -------------------------------------------------------------- */}
+        {view === "processes" && <ServiceProcessManagement mode="processes" />}
 
         {view === "sessions" && <SessionManagement onOpenTerminal={openTerminal} />}
 
-        {/* --------------------------------------------------------------
-         * Services
-         * -------------------------------------------------------------- */}
-
-        {view === "services" && (
-          <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-            <div className="border-b border-zinc-800 p-5 sm:p-6">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold">Services</h2>
-
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {activeServices} active · {snapshot.Services.length} total
-                  </p>
-                </div>
-
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-                  <ActivityIcon />
-                </div>
-              </div>
-            </div>
-
-            <div className="divide-y divide-zinc-800">
-              {snapshot.Services.map((service) => (
-                <div key={service.name} className="p-4 transition hover:bg-zinc-800/40 sm:p-5">
-                  <div className="flex items-center gap-4">
-                    <div
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                        service.active
-                          ? "bg-green-400/10 text-green-400"
-                          : "bg-zinc-800 text-zinc-500"
-                      }`}
-                    >
-                      <ServiceIcon name={service.name} />
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                        <p className="truncate text-sm font-medium">{service.name}</p>
-
-                        <span
-                          className={`w-fit rounded-full px-2.5 py-1 text-[11px] ${
-                            service.active
-                              ? "bg-green-400/10 text-green-400"
-                              : "bg-zinc-800 text-zinc-500"
-                          }`}
-                        >
-                          {service.active ? "Running" : "Stopped"}
-                        </span>
-                      </div>
-
-                      <p className="mt-1 truncate text-xs text-zinc-500">
-                        {service.description || "System service"}
-                      </p>
-                    </div>
-
-                    <div className="hidden shrink-0 sm:block">
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-xs ${
-                          service.enabled
-                            ? "bg-blue-400/10 text-blue-400"
-                            : "bg-zinc-800 text-zinc-600"
-                        }`}
-                      >
-                        {service.enabled ? "Enabled" : "Disabled"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* --------------------------------------------------------------
-         * Audit
-         * -------------------------------------------------------------- */}
+        {view === "services" && <ServiceProcessManagement mode="services" />}
 
         {view === "audit" && (
           <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -850,6 +585,18 @@ export default function Dashboard({
                     <option value="terminal.connect">Terminal connect</option>
 
                     <option value="terminal.disconnect">Terminal disconnect</option>
+
+                    <option value="service.start">Service start</option>
+
+                    <option value="service.stop">Service stop</option>
+
+                    <option value="service.restart">Service restart</option>
+
+                    <option value="service.enable">Service enable</option>
+
+                    <option value="service.disable">Service disable</option>
+
+                    <option value="process.kill">Process kill</option>
                   </select>
                 </label>
 
@@ -890,7 +637,8 @@ export default function Dashboard({
                 <p className="text-sm text-zinc-400">No audit events found.</p>
 
                 <p className="mt-2 text-xs text-zinc-600">
-                  Events will appear here when users sign in, sign out, or open terminals.
+                  Events will appear here when users sign in, sign out, open terminals, or manage
+                  VPS resources.
                 </p>
               </div>
             ) : (
@@ -975,9 +723,6 @@ export default function Dashboard({
           </section>
         )}
 
-        {/* --------------------------------------------------------------
-         * System
-         * -------------------------------------------------------------- */}
         {view === "system" && <SystemManagement snapshot={snapshot} user={user} />}
       </div>
     </main>
