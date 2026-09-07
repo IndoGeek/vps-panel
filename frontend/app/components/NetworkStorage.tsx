@@ -107,7 +107,7 @@ function ArrowUpIcon() {
   );
 }
 
-function StorageSummaryCard({
+export function StorageSummaryCard({
   snapshot,
   onViewSystem,
 }: {
