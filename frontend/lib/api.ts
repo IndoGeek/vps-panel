@@ -1,3 +1,5 @@
+import { requestElevationPassword } from "@/lib/elevated-auth";
+
 export type HealthResponse = {
   status: string;
 };
@@ -308,7 +310,6 @@ export async function renameTmuxSession(
   newName: string,
 ): Promise<SessionOperationResponse> {
   const trimmedCurrentName = currentName.trim();
-
   const trimmedNewName = newName.trim();
 
   if (!trimmedCurrentName) {
@@ -381,26 +382,6 @@ export async function deleteTmuxSessions(names: string[]): Promise<SessionDelete
  * --------------------------------------------------------------------------
  */
 
-async function requestElevationPassword(): Promise<string> {
-  if (typeof window === "undefined") {
-    throw new Error("Elevated authentication is only available in the browser.");
-  }
-
-  const password = window.prompt(
-    "Administrator authentication required.\n\nEnter your Linux VPS password:",
-  );
-
-  if (password === null) {
-    throw new Error("Elevated authentication cancelled.");
-  }
-
-  if (!password) {
-    throw new Error("Password is required.");
-  }
-
-  return password;
-}
-
 function addPasswordToBody(body: BodyInit | null | undefined, password: string): BodyInit {
   let parsed: Record<string, unknown> = {};
 
@@ -449,6 +430,7 @@ export async function requestSystemPower(action: SystemPowerAction): Promise<Sys
       cache: "no-store",
       headers: {
         Accept: "application/json",
+
         ...(body
           ? {
               "Content-Type": "application/json",

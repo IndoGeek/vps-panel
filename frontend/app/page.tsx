@@ -1,15 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
 import Dashboard from "./dashboard";
+import ElevatedAuthDialog from "./components/ElevatedAuthDialog";
+
 import { getMe, getSnapshot, type UserInfo } from "@/lib/api";
 
 export default function Home() {
   const [user, setUser] = useState<UserInfo | null>(null);
+
   const [snapshot, setSnapshot] = useState<Awaited<ReturnType<typeof getSnapshot>> | null>(null);
+
   const [loading, setLoading] = useState(true);
+
   const [username, setUsername] = useState("");
+
   const [password, setPassword] = useState("");
+
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -59,7 +67,9 @@ export default function Home() {
       const result = await response.json();
 
       setUser(result.user);
+
       setSnapshot(await getSnapshot());
+
       setPassword("");
     } catch {
       setError("Invalid username or password.");
@@ -83,15 +93,11 @@ export default function Home() {
           onSubmit={login}
           className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-6"
         >
-          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">
-            VPS Panel
-          </p>
+          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">VPS Panel</p>
 
           <h1 className="mt-2 text-2xl font-semibold">Sign in</h1>
 
-          <p className="mt-2 text-sm text-zinc-500">
-            Authenticate to manage this server.
-          </p>
+          <p className="mt-2 text-sm text-zinc-500">Authenticate to manage this server.</p>
 
           <div className="mt-6 space-y-4">
             <input
@@ -112,11 +118,7 @@ export default function Home() {
             />
           </div>
 
-          {error && (
-            <p className="mt-4 text-sm text-red-400">
-              {error}
-            </p>
-          )}
+          {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
           <button
             type="submit"
@@ -130,5 +132,11 @@ export default function Home() {
     );
   }
 
-  return <Dashboard initialSnapshot={snapshot} user={user} />;
+  return (
+    <>
+      <Dashboard initialSnapshot={snapshot} user={user} />
+
+      <ElevatedAuthDialog />
+    </>
+  );
 }
