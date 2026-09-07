@@ -19,28 +19,6 @@ type Snapshot = Awaited<ReturnType<typeof getSnapshot>>;
 
 type View = "dashboard" | "processes" | "sessions" | "services" | "system" | "audit";
 
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes < 0) {
-    return "0 B";
-  }
-
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-
-  let value = bytes;
-  let unit = 0;
-
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-
-  if (unit === 0) {
-    return `${Math.round(value)} ${units[unit]}`;
-  }
-
-  return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unit]}`;
-}
-
 function DashboardActionButton({
   children,
   onClick,
@@ -63,6 +41,79 @@ function DashboardActionButton({
   );
 }
 
+function AuditSummaryCard({
+  latestAudit,
+  onViewAudit,
+}: {
+  latestAudit: AuditEntry | null;
+  onViewAudit: () => void;
+}) {
+  const statusClass =
+    latestAudit?.status === "success"
+      ? "bg-green-400/10 text-green-400"
+      : latestAudit?.status === "denied"
+        ? "bg-yellow-400/10 text-yellow-400"
+        : latestAudit?.status
+          ? "bg-red-400/10 text-red-400"
+          : "bg-zinc-800 text-zinc-500";
+
+  return (
+    <section className="flex h-full min-h-[190px] flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm text-zinc-500">Audit</p>
+
+          <p className="mt-3 text-3xl font-semibold">{latestAudit ? "Latest" : "—"}</p>
+        </div>
+
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 5h16v14H4z" />
+            <path d="M8 9h8M8 13h5M8 17h3" />
+          </svg>
+        </div>
+      </div>
+
+      <div className="mt-5 min-w-0">
+        <div className="flex min-w-0 items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-3 py-2.5">
+          <span
+            className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium uppercase tracking-wide ${statusClass}`}
+          >
+            {latestAudit?.status ?? "none"}
+          </span>
+
+          <span className="min-w-0 truncate font-mono text-xs text-zinc-300">
+            {latestAudit?.action ?? "No audit events"}
+          </span>
+
+          {latestAudit && (
+            <>
+              <span className="shrink-0 text-zinc-700">•</span>
+
+              <span className="shrink-0 text-[10px] text-zinc-600">
+                {new Date(latestAudit.created_at).toLocaleTimeString()}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-auto pt-4">
+        <DashboardActionButton onClick={onViewAudit}>View audit →</DashboardActionButton>
+      </div>
+    </section>
+  );
+}
+
 export default function Dashboard({
   initialSnapshot,
   user,
@@ -79,6 +130,8 @@ export default function Dashboard({
   const [menuOpen, setMenuOpen] = useState(false);
 
   const [view, setView] = useState<View>("dashboard");
+
+  const [latestAudit, setLatestAudit] = useState<AuditEntry | null>(null);
 
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
 
@@ -113,9 +166,6 @@ export default function Dashboard({
 
   /*
    * Keep the live snapshot refresh.
-   *
-   * Dashboard intentionally uses the same resource
-   * cards as SystemManagement.
    */
   useEffect(() => {
     setLastUpdated(new Date());
@@ -140,6 +190,44 @@ export default function Dashboard({
     return () => clearInterval(interval);
   }, []);
 
+  /*
+   * Dashboard audit summary.
+   *
+   * The dashboard only needs the newest event.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLatestAudit = async () => {
+      try {
+        const result = await getAuditLogs({
+          limit: 1,
+          offset: 0,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setLatestAudit(result.entries[0] ?? null);
+      } catch (error) {
+        console.error("Failed to load latest audit event:", error);
+      }
+    };
+
+    void loadLatestAudit();
+
+    const interval = setInterval(loadLatestAudit, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  /*
+   * Full audit page loading.
+   */
   useEffect(() => {
     if (view !== "audit") {
       return;
@@ -418,14 +506,24 @@ export default function Dashboard({
 
         {view === "dashboard" && (
           <>
+            {/* Resources */}
             <SystemResourceGrid snapshot={snapshot} />
 
+            {/* Network + Storage */}
+            <section className="mt-6 grid items-stretch gap-4 sm:grid-cols-2">
+              <NetworkSummaryCard snapshot={snapshot} onViewSystem={() => changeView("system")} />
+
+              <StorageSummaryCard snapshot={snapshot} onViewSystem={() => changeView("system")} />
+            </section>
+
+            {/* Power controls */}
             <div className="mt-6">
               <SystemPowerControls />
             </div>
 
-            <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+            {/* Quick management cards */}
+            <section className="mt-6 grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <section className="flex h-full min-h-[190px] flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm text-zinc-500">Services</p>
@@ -443,7 +541,7 @@ export default function Dashboard({
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+              <section className="flex h-full min-h-[190px] flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm text-zinc-500">Processes</p>
@@ -457,7 +555,7 @@ export default function Dashboard({
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+              <section className="flex h-full min-h-[190px] flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm text-zinc-500">Tmux Sessions</p>
@@ -471,11 +569,10 @@ export default function Dashboard({
                 </div>
               </section>
 
-              <NetworkSummaryCard snapshot={snapshot} onViewSystem={() => changeView("system")} />
-
-              <StorageSummaryCard snapshot={snapshot} onViewSystem={() => changeView("system")} />
+              <AuditSummaryCard latestAudit={latestAudit} onViewAudit={() => changeView("audit")} />
             </section>
 
+            {/* Compact system information */}
             <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -553,31 +650,20 @@ export default function Dashboard({
                     value={auditAction}
                     onChange={(event) => {
                       setAuditAction(event.target.value);
-
                       setAuditOffset(0);
                     }}
                     className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
                   >
                     <option value="">All actions</option>
-
                     <option value="auth.login">Login</option>
-
                     <option value="auth.logout">Logout</option>
-
                     <option value="terminal.connect">Terminal connect</option>
-
                     <option value="terminal.disconnect">Terminal disconnect</option>
-
                     <option value="service.start">Service start</option>
-
                     <option value="service.stop">Service stop</option>
-
                     <option value="service.restart">Service restart</option>
-
                     <option value="service.enable">Service enable</option>
-
                     <option value="service.disable">Service disable</option>
-
                     <option value="process.kill">Process kill</option>
                   </select>
                 </label>
@@ -591,17 +677,13 @@ export default function Dashboard({
                     value={auditStatus}
                     onChange={(event) => {
                       setAuditStatus(event.target.value);
-
                       setAuditOffset(0);
                     }}
                     className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
                   >
                     <option value="">All statuses</option>
-
                     <option value="success">Success</option>
-
                     <option value="failure">Failure</option>
-
                     <option value="denied">Denied</option>
                   </select>
                 </label>

@@ -1,6 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import type { FilesystemInfo, NetworkInterfaceInfo, Snapshot } from "@/lib/api";
+
+const PAGE_SIZE = 3;
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 0) {
@@ -107,6 +111,54 @@ function ArrowUpIcon() {
   );
 }
 
+function Pagination({
+  page,
+  pageCount,
+  onPageChange,
+}: {
+  page: number;
+  pageCount: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (pageCount <= 1) {
+    return null;
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-zinc-800 px-5 py-4 sm:px-6">
+      <button
+        type="button"
+        disabled={page === 0}
+        onClick={() => onPageChange(Math.max(0, page - 1))}
+        className="rounded-full bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+        style={{
+          WebkitTapHighlightColor: "transparent",
+          touchAction: "manipulation",
+        }}
+      >
+        ← Previous
+      </button>
+
+      <span className="rounded-full bg-zinc-950 px-3 py-1.5 text-xs text-zinc-500">
+        {page + 1} / {pageCount}
+      </span>
+
+      <button
+        type="button"
+        disabled={page >= pageCount - 1}
+        onClick={() => onPageChange(Math.min(pageCount - 1, page + 1))}
+        className="rounded-full bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+        style={{
+          WebkitTapHighlightColor: "transparent",
+          touchAction: "manipulation",
+        }}
+      >
+        Next →
+      </button>
+    </div>
+  );
+}
+
 export function StorageSummaryCard({
   snapshot,
   onViewSystem,
@@ -119,7 +171,7 @@ export function StorageSummaryCard({
     snapshot.Filesystems[0];
 
   return (
-    <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+    <section className="flex h-full flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm text-zinc-500">Storage</p>
@@ -148,7 +200,9 @@ export function StorageSummaryCard({
 
         <p className="mt-1 text-xs text-zinc-600">
           {rootFilesystem
-            ? `${formatBytes(rootFilesystem.used_bytes)} of ${formatBytes(rootFilesystem.total_bytes)}`
+            ? `${formatBytes(
+                rootFilesystem.used_bytes,
+              )} of ${formatBytes(rootFilesystem.total_bytes)}`
             : "No filesystem data"}
         </p>
       </div>
@@ -169,16 +223,108 @@ export function StorageSummaryCard({
       <button
         type="button"
         onClick={onViewSystem}
-        className="mt-4 rounded-full bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100"
+        className="mt-auto pt-4 text-left"
         style={{
           WebkitTapHighlightColor: "transparent",
           touchAction: "manipulation",
         }}
       >
-        View filesystems →
+        <span className="inline-flex rounded-full bg-zinc-100 px-4 py-2.5 text-xs font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.98]">
+          View filesystems →
+        </span>
       </button>
     </section>
   );
+}
+
+function NetworkSummaryCardContent({
+  snapshot,
+  onViewSystem,
+}: {
+  snapshot: Snapshot;
+  onViewSystem: () => void;
+}) {
+  const interfaces = snapshot.Network;
+
+  const activeInterfaces = interfaces.filter((item) => item.state === "up" && !item.loopback);
+
+  const primaryInterface =
+    activeInterfaces.find((item) => item.ipv4.length > 0) ?? activeInterfaces[0] ?? interfaces[0];
+
+  return (
+    <section className="flex h-full flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm text-zinc-500">Network</p>
+
+          <p className="mt-3 text-3xl font-semibold">{activeInterfaces.length}</p>
+
+          <p className="mt-2 text-xs text-zinc-500">
+            active interface
+            {activeInterfaces.length === 1 ? "" : "s"}
+          </p>
+        </div>
+
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+          <NetworkIcon />
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl bg-zinc-950/70 p-3">
+        <p className="text-xs text-zinc-600">Primary interface</p>
+
+        <p className="mt-1 truncate text-sm font-medium text-zinc-200">
+          {primaryInterface?.name ?? "—"}
+        </p>
+
+        <p className="mt-1 truncate text-xs text-zinc-600">
+          {primaryInterface?.ipv4[0] ?? primaryInterface?.ipv6[0] ?? "No IP address"}
+        </p>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <div className="rounded-xl bg-zinc-950/70 p-3">
+          <p className="text-xs text-zinc-600">Received</p>
+
+          <p className="mt-1 text-sm font-medium text-zinc-200">
+            {formatBytes(snapshot.Metrics.network_rx_bytes)}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-zinc-950/70 p-3">
+          <p className="text-xs text-zinc-600">Transmitted</p>
+
+          <p className="mt-1 text-sm font-medium text-zinc-200">
+            {formatBytes(snapshot.Metrics.network_tx_bytes)}
+          </p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onViewSystem}
+        className="mt-auto pt-4 text-left"
+        style={{
+          WebkitTapHighlightColor: "transparent",
+          touchAction: "manipulation",
+        }}
+      >
+        <span className="inline-flex rounded-full bg-zinc-100 px-4 py-2.5 text-xs font-semibold text-zinc-900 transition hover:bg-white active:scale-[0.98]">
+          View interfaces →
+        </span>
+      </button>
+    </section>
+  );
+}
+
+export function NetworkSummaryCard({
+  snapshot,
+  onViewSystem,
+}: {
+  snapshot: Snapshot;
+  onViewSystem: () => void;
+}) {
+  return <NetworkSummaryCardContent snapshot={snapshot} onViewSystem={onViewSystem} />;
 }
 
 function InterfaceCard({ item }: { item: NetworkInterfaceInfo }) {
@@ -350,210 +496,37 @@ function FilesystemCard({ item }: { item: FilesystemInfo }) {
   );
 }
 
-function NetworkSummaryCardInternal({
-  snapshot,
-  onViewSystem,
-}: {
-  snapshot: Snapshot;
-  onViewSystem: () => void;
-}) {
-  return <NetworkSummaryCardContent snapshot={snapshot} onViewSystem={onViewSystem} />;
-}
-
-function NetworkSummaryCardContent({
-  snapshot,
-  onViewSystem,
-}: {
-  snapshot: Snapshot;
-  onViewSystem: () => void;
-}) {
-  return <NetworkSummaryCardBase snapshot={snapshot} onViewSystem={onViewSystem} />;
-}
-
-function NetworkSummaryCardBase({
-  snapshot,
-  onViewSystem,
-}: {
-  snapshot: Snapshot;
-  onViewSystem: () => void;
-}) {
-  return <NetworkSummaryCardView snapshot={snapshot} onViewSystem={onViewSystem} />;
-}
-
-function NetworkSummaryCardView({
-  snapshot,
-  onViewSystem,
-}: {
-  snapshot: Snapshot;
-  onViewSystem: () => void;
-}) {
-  return <NetworkSummaryCardRender snapshot={snapshot} onViewSystem={onViewSystem} />;
-}
-
-function NetworkSummaryCardRender({
-  snapshot,
-  onViewSystem,
-}: {
-  snapshot: Snapshot;
-  onViewSystem: () => void;
-}) {
-  return <NetworkSummaryCardActual snapshot={snapshot} onViewSystem={onViewSystem} />;
-}
-
-function NetworkSummaryCardActual({
-  snapshot,
-  onViewSystem,
-}: {
-  snapshot: Snapshot;
-  onViewSystem: () => void;
-}) {
-  const interfaces = snapshot.Network;
-  const activeInterfaces = interfaces.filter((item) => item.state === "up" && !item.loopback);
-
-  const primaryInterface =
-    activeInterfaces.find((item) => item.ipv4.length > 0) ?? activeInterfaces[0] ?? interfaces[0];
-
-  return (
-    <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm text-zinc-500">Network</p>
-
-          <p className="mt-3 text-3xl font-semibold">{activeInterfaces.length}</p>
-
-          <p className="mt-2 text-xs text-zinc-500">
-            active interface{activeInterfaces.length === 1 ? "" : "s"}
-          </p>
-        </div>
-
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-          <NetworkIcon />
-        </div>
-      </div>
-
-      <div className="mt-5 rounded-xl bg-zinc-950/70 p-3">
-        <p className="text-xs text-zinc-600">Primary interface</p>
-
-        <p className="mt-1 truncate text-sm font-medium text-zinc-200">
-          {primaryInterface?.name ?? "—"}
-        </p>
-
-        <p className="mt-1 truncate text-xs text-zinc-600">
-          {primaryInterface?.ipv4[0] ?? primaryInterface?.ipv6[0] ?? "No IP address"}
-        </p>
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <div className="rounded-xl bg-zinc-950/70 p-3">
-          <p className="text-xs text-zinc-600">Received</p>
-
-          <p className="mt-1 text-sm font-medium text-zinc-200">
-            {formatBytes(snapshot.Metrics.network_rx_bytes)}
-          </p>
-        </div>
-
-        <div className="rounded-xl bg-zinc-950/70 p-3">
-          <p className="text-xs text-zinc-600">Transmitted</p>
-
-          <p className="mt-1 text-sm font-medium text-zinc-200">
-            {formatBytes(snapshot.Metrics.network_tx_bytes)}
-          </p>
-        </div>
-      </div>
-
-      <button
-        type="button"
-        onClick={onViewSystem}
-        className="mt-4 rounded-full bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100"
-        style={{
-          WebkitTapHighlightColor: "transparent",
-          touchAction: "manipulation",
-        }}
-      >
-        View interfaces →
-      </button>
-    </section>
-  );
-}
-
-export function NetworkSummaryCard({
-  snapshot,
-  onViewSystem,
-}: {
-  snapshot: Snapshot;
-  onViewSystem: () => void;
-}) {
-  const interfaces = snapshot.Network;
-
-  const activeInterfaces = interfaces.filter((item) => item.state === "up" && !item.loopback);
-
-  const primaryInterface =
-    activeInterfaces.find((item) => item.ipv4.length > 0) ?? activeInterfaces[0] ?? interfaces[0];
-
-  return (
-    <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm text-zinc-500">Network</p>
-
-          <p className="mt-3 text-3xl font-semibold">{activeInterfaces.length}</p>
-
-          <p className="mt-2 text-xs text-zinc-500">
-            active interface{activeInterfaces.length === 1 ? "" : "s"}
-          </p>
-        </div>
-
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-          <NetworkIcon />
-        </div>
-      </div>
-
-      <div className="mt-5 rounded-xl bg-zinc-950/70 p-3">
-        <p className="text-xs text-zinc-600">Primary interface</p>
-
-        <p className="mt-1 truncate text-sm font-medium text-zinc-200">
-          {primaryInterface?.name ?? "—"}
-        </p>
-
-        <p className="mt-1 truncate text-xs text-zinc-600">
-          {primaryInterface?.ipv4[0] ?? primaryInterface?.ipv6[0] ?? "No IP address"}
-        </p>
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <div className="rounded-xl bg-zinc-950/70 p-3">
-          <p className="text-xs text-zinc-600">Received</p>
-
-          <p className="mt-1 text-sm font-medium text-zinc-200">
-            {formatBytes(snapshot.Metrics.network_rx_bytes)}
-          </p>
-        </div>
-
-        <div className="rounded-xl bg-zinc-950/70 p-3">
-          <p className="text-xs text-zinc-600">Transmitted</p>
-
-          <p className="mt-1 text-sm font-medium text-zinc-200">
-            {formatBytes(snapshot.Metrics.network_tx_bytes)}
-          </p>
-        </div>
-      </div>
-
-      <button
-        type="button"
-        onClick={onViewSystem}
-        className="mt-4 rounded-full bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-700 hover:text-zinc-100"
-        style={{
-          WebkitTapHighlightColor: "transparent",
-          touchAction: "manipulation",
-        }}
-      >
-        View interfaces →
-      </button>
-    </section>
-  );
-}
-
 export function NetworkStorageDetails({ snapshot }: { snapshot: Snapshot }) {
+  const [networkPage, setNetworkPage] = useState(0);
+
+  const [filesystemPage, setFilesystemPage] = useState(0);
+
+  const networkPageCount = Math.max(1, Math.ceil(snapshot.Network.length / PAGE_SIZE));
+
+  const filesystemPageCount = Math.max(1, Math.ceil(snapshot.Filesystems.length / PAGE_SIZE));
+
+  const safeNetworkPage = Math.min(networkPage, networkPageCount - 1);
+
+  const safeFilesystemPage = Math.min(filesystemPage, filesystemPageCount - 1);
+
+  useEffect(() => {
+    setNetworkPage((current) => Math.min(current, networkPageCount - 1));
+  }, [networkPageCount]);
+
+  useEffect(() => {
+    setFilesystemPage((current) => Math.min(current, filesystemPageCount - 1));
+  }, [filesystemPageCount]);
+
+  const visibleInterfaces = snapshot.Network.slice(
+    safeNetworkPage * PAGE_SIZE,
+    safeNetworkPage * PAGE_SIZE + PAGE_SIZE,
+  );
+
+  const visibleFilesystems = snapshot.Filesystems.slice(
+    safeFilesystemPage * PAGE_SIZE,
+    safeFilesystemPage * PAGE_SIZE + PAGE_SIZE,
+  );
+
   return (
     <div className="space-y-6">
       <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -579,9 +552,15 @@ export function NetworkStorageDetails({ snapshot }: { snapshot: Snapshot }) {
               <p className="text-sm text-zinc-400">No network interfaces were reported.</p>
             </div>
           ) : (
-            snapshot.Network.map((item) => <InterfaceCard key={item.name} item={item} />)
+            visibleInterfaces.map((item) => <InterfaceCard key={item.name} item={item} />)
           )}
         </div>
+
+        <Pagination
+          page={safeNetworkPage}
+          pageCount={networkPageCount}
+          onPageChange={setNetworkPage}
+        />
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
@@ -607,11 +586,17 @@ export function NetworkStorageDetails({ snapshot }: { snapshot: Snapshot }) {
               <p className="text-sm text-zinc-400">No filesystems were reported.</p>
             </div>
           ) : (
-            snapshot.Filesystems.map((item) => (
+            visibleFilesystems.map((item) => (
               <FilesystemCard key={`${item.mount_point}:${item.device}`} item={item} />
             ))
           )}
         </div>
+
+        <Pagination
+          page={safeFilesystemPage}
+          pageCount={filesystemPageCount}
+          onPageChange={setFilesystemPage}
+        />
       </section>
     </div>
   );

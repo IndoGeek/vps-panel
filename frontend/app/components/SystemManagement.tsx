@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
 import { getHealth, requestSystemPower, type Snapshot, type UserInfo } from "@/lib/api";
+
 import { NetworkStorageDetails } from "@/app/components/NetworkStorage";
 
 type PowerAction = "reboot" | "shutdown";
@@ -293,12 +295,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/*
- * Shared resource cards.
- *
- * This is intentionally exported because the Dashboard uses the exact same
- * resource-card UI as the dedicated System page.
- */
 export function SystemResourceGrid({ snapshot }: { snapshot: Snapshot }) {
   const cpu = snapshot.Metrics.cpu_percent;
   const memory = snapshot.Metrics.memory_percent;
@@ -325,9 +321,9 @@ export function SystemResourceGrid({ snapshot }: { snapshot: Snapshot }) {
         <ResourceCard
           title="Memory"
           value={formatPercent(memory)}
-          subtitle={`${formatBytes(
-            snapshot.Metrics.memory_used_bytes,
-          )} of ${formatBytes(snapshot.Metrics.memory_total_bytes)}`}
+          subtitle={`${formatBytes(snapshot.Metrics.memory_used_bytes)} of ${formatBytes(
+            snapshot.Metrics.memory_total_bytes,
+          )}`}
           icon={<MemoryIcon />}
           progress={memory}
           progressLabel="Memory utilization"
@@ -336,9 +332,9 @@ export function SystemResourceGrid({ snapshot }: { snapshot: Snapshot }) {
         <ResourceCard
           title="Disk"
           value={formatPercent(disk)}
-          subtitle={`${formatBytes(
-            snapshot.Metrics.disk_used_bytes,
-          )} of ${formatBytes(snapshot.Metrics.disk_total_bytes)}`}
+          subtitle={`${formatBytes(snapshot.Metrics.disk_used_bytes)} of ${formatBytes(
+            snapshot.Metrics.disk_total_bytes,
+          )}`}
           icon={<DiskIcon />}
           progress={disk}
           progressLabel="Root filesystem"
@@ -393,6 +389,7 @@ export default function SystemManagement({
 }) {
   return (
     <div className="space-y-6">
+      {/* System information */}
       <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="border-b border-zinc-800 p-5 sm:p-6">
           <div className="flex items-center gap-4">
@@ -434,12 +431,10 @@ export default function SystemManagement({
         </dl>
       </section>
 
-      <SystemResourceGrid snapshot={snapshot} />
-
-      <NetworkStorageDetails snapshot={snapshot} />
-
+      {/* Power controls intentionally moved directly below System information */}
       <SystemPowerControls />
 
+      {/* Authenticated identity intentionally moved above Resources */}
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
         <div className="flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
@@ -477,6 +472,12 @@ export default function SystemManagement({
           </div>
         </div>
       </section>
+
+      {/* Resources */}
+      <SystemResourceGrid snapshot={snapshot} />
+
+      {/* Network + Storage */}
+      <NetworkStorageDetails snapshot={snapshot} />
     </div>
   );
 }
@@ -632,17 +633,13 @@ function PowerStatusOverlay({ state }: { state: PowerState }) {
   );
 }
 
-/*
- * Shared power-control component.
- *
- * Both Dashboard and System use this exact implementation, so confirmation,
- * authenticated API calls, reboot polling, and reconnect handling remain in
- * one place.
- */
 export function SystemPowerControls() {
   const [powerState, setPowerState] = useState<PowerState>("idle");
+
   const [pendingAction, setPendingAction] = useState<PowerAction | null>(null);
+
   const [powerError, setPowerError] = useState("");
+
   const [confirmLoading, setConfirmLoading] = useState(false);
 
   useEffect(() => {
@@ -679,6 +676,7 @@ export function SystemPowerControls() {
 
         if (attempts >= 60) {
           setPowerState("error");
+
           setPowerError("The VPS has not responded after 2 minutes. Check the server externally.");
 
           return;
@@ -729,6 +727,7 @@ export function SystemPowerControls() {
 
   const requestPowerAction = (action: PowerAction) => {
     setPowerError("");
+
     setPendingAction(action);
 
     setPowerState(action === "reboot" ? "confirm-reboot" : "confirm-shutdown");
@@ -740,6 +739,7 @@ export function SystemPowerControls() {
     }
 
     setPendingAction(null);
+
     setPowerState("idle");
   };
 
@@ -750,6 +750,7 @@ export function SystemPowerControls() {
 
     try {
       setConfirmLoading(true);
+
       setPowerError("");
 
       await requestSystemPower(pendingAction);
