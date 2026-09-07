@@ -80,6 +80,8 @@ export default function TerminalPage() {
 
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const visibilityReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const reconnectAttemptRef = useRef(0);
 
   const disposedRef = useRef(false);
@@ -268,6 +270,40 @@ export default function TerminalPage() {
       };
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      if (disposedRef.current) {
+        return;
+      }
+
+      if (visibilityReconnectTimerRef.current !== null) {
+        clearTimeout(visibilityReconnectTimerRef.current);
+      }
+
+      visibilityReconnectTimerRef.current = setTimeout(() => {
+        visibilityReconnectTimerRef.current = null;
+
+        const socket = socketRef.current;
+
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          try {
+            socket.close(1000, "Safari page resumed");
+          } catch {}
+        }
+
+        socketRef.current = null;
+
+        reconnectAttemptRef.current = 0;
+
+        connectSocket();
+      }, 250);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     const initialize = async () => {
       try {
         const me = await getMe();
@@ -385,6 +421,13 @@ export default function TerminalPage() {
       disposedRef.current = true;
 
       clearReconnectTimer();
+
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+
+      if (visibilityReconnectTimerRef.current !== null) {
+        clearTimeout(visibilityReconnectTimerRef.current);
+        visibilityReconnectTimerRef.current = null;
+      }
 
       cleanupResize?.();
 
