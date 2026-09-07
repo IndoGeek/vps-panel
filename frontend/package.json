@@ -6,6 +6,7 @@
     "dev": "node server.mjs",
     "build": "next build",
     "start": "NODE_ENV=production node server.mjs",
+    "deploy": "npm run build && pm2 restart vps-panel-frontend",
     "lint": "eslint"
   },
   "dependencies": {
