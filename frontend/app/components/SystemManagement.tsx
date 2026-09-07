@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getHealth, requestSystemPower, type Snapshot, type UserInfo } from "@/lib/api";
+import { NetworkStorageDetails } from "@/app/components/NetworkStorage";
 
 type PowerAction = "reboot" | "shutdown";
 
@@ -380,6 +381,103 @@ export function SystemResourceGrid({ snapshot }: { snapshot: Snapshot }) {
         </section>
       </div>
     </section>
+  );
+}
+
+export default function SystemManagement({
+  snapshot,
+  user,
+}: {
+  snapshot: Snapshot;
+  user: UserInfo;
+}) {
+  return (
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+        <div className="border-b border-zinc-800 p-5 sm:p-6">
+          <div className="flex items-center gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+              <ServerIcon />
+            </div>
+
+            <div>
+              <h2 className="text-lg font-semibold">System information</h2>
+
+              <p className="mt-1 text-sm text-zinc-500">Operating system and Linux identity</p>
+            </div>
+          </div>
+        </div>
+
+        <dl className="grid gap-x-8 gap-y-7 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-3">
+          <InfoRow label="Hostname" value={snapshot.System.hostname} />
+
+          <InfoRow label="Operating system" value={snapshot.System.os} />
+
+          <InfoRow label="Architecture" value={snapshot.System.architecture} />
+
+          <InfoRow label="Kernel" value={snapshot.System.kernel} />
+
+          <InfoRow label="Linux user" value={`${user.username} · UID ${user.uid}`} />
+
+          <InfoRow label="Home directory" value={user.home_dir} />
+
+          <InfoRow label="Shell" value={user.shell} />
+
+          <InfoRow label="Uptime" value={formatUptime(snapshot.Metrics.uptime_seconds)} />
+
+          <InfoRow
+            label="Load average"
+            value={`${snapshot.Metrics.load_1.toFixed(2)} / ${snapshot.Metrics.load_5.toFixed(
+              2,
+            )} / ${snapshot.Metrics.load_15.toFixed(2)}`}
+          />
+        </dl>
+      </section>
+
+      <SystemResourceGrid snapshot={snapshot} />
+
+      <NetworkStorageDetails snapshot={snapshot} />
+
+      <SystemPowerControls />
+
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
+            <UserIcon />
+          </div>
+
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold">Authenticated Linux identity</h2>
+
+            <p className="mt-1 text-sm text-zinc-500">
+              The Linux identity associated with your panel session.
+            </p>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">Username</p>
+
+                <p className="mt-2 truncate text-sm">{user.username}</p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">UID / GID</p>
+
+                <p className="mt-2 text-sm">
+                  {user.uid} / {user.gid}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">Shell</p>
+
+                <p className="mt-2 truncate font-mono text-sm">{user.shell}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -767,100 +865,5 @@ export function SystemPowerControls() {
 
       <PowerStatusOverlay state={powerState} />
     </>
-  );
-}
-
-export default function SystemManagement({
-  snapshot,
-  user,
-}: {
-  snapshot: Snapshot;
-  user: UserInfo;
-}) {
-  return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-        <div className="border-b border-zinc-800 p-5 sm:p-6">
-          <div className="flex items-center gap-4">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-              <ServerIcon />
-            </div>
-
-            <div>
-              <h2 className="text-lg font-semibold">System information</h2>
-
-              <p className="mt-1 text-sm text-zinc-500">Operating system and Linux identity</p>
-            </div>
-          </div>
-        </div>
-
-        <dl className="grid gap-x-8 gap-y-7 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-3">
-          <InfoRow label="Hostname" value={snapshot.System.hostname} />
-
-          <InfoRow label="Operating system" value={snapshot.System.os} />
-
-          <InfoRow label="Architecture" value={snapshot.System.architecture} />
-
-          <InfoRow label="Kernel" value={snapshot.System.kernel} />
-
-          <InfoRow label="Linux user" value={`${user.username} · UID ${user.uid}`} />
-
-          <InfoRow label="Home directory" value={user.home_dir} />
-
-          <InfoRow label="Shell" value={user.shell} />
-
-          <InfoRow label="Uptime" value={formatUptime(snapshot.Metrics.uptime_seconds)} />
-
-          <InfoRow
-            label="Load average"
-            value={`${snapshot.Metrics.load_1.toFixed(2)} / ${snapshot.Metrics.load_5.toFixed(
-              2,
-            )} / ${snapshot.Metrics.load_15.toFixed(2)}`}
-          />
-        </dl>
-      </section>
-
-      <SystemResourceGrid snapshot={snapshot} />
-
-      <SystemPowerControls />
-
-      <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
-        <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-zinc-300">
-            <UserIcon />
-          </div>
-
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold">Authenticated Linux identity</h2>
-
-            <p className="mt-1 text-sm text-zinc-500">
-              The Linux identity associated with your panel session.
-            </p>
-
-            <div className="mt-5 grid gap-4 sm:grid-cols-3">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-zinc-600">Username</p>
-
-                <p className="mt-2 truncate text-sm">{user.username}</p>
-              </div>
-
-              <div>
-                <p className="text-xs uppercase tracking-wide text-zinc-600">UID / GID</p>
-
-                <p className="mt-2 text-sm">
-                  {user.uid} / {user.gid}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs uppercase tracking-wide text-zinc-600">Shell</p>
-
-                <p className="mt-2 truncate font-mono text-sm">{user.shell}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </div>
   );
 }

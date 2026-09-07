@@ -36,6 +36,31 @@ export type SystemMetrics = {
   network_tx_bytes: number;
 };
 
+export type NetworkInterfaceInfo = {
+  name: string;
+  state: string;
+  mac: string;
+  mtu: number;
+  ipv4: string[];
+  ipv6: string[];
+  rx_bytes: number;
+  tx_bytes: number;
+  rx_packets: number;
+  tx_packets: number;
+  loopback: boolean;
+};
+
+export type FilesystemInfo = {
+  device: string;
+  mount_point: string;
+  type: string;
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+  used_percent: number;
+  read_only: boolean;
+};
+
 export type UserInfo = {
   username: string;
   uid: number;
@@ -72,6 +97,8 @@ export type ServiceInfo = {
 export type Snapshot = {
   System: SystemInfo;
   Metrics: SystemMetrics;
+  Network: NetworkInterfaceInfo[];
+  Filesystems: FilesystemInfo[];
   Users: UserInfo[];
   Sessions: SessionInfo[];
   Processes: ProcessInfo[];
@@ -458,7 +485,7 @@ export async function requestSystemPower(action: SystemPowerAction): Promise<Sys
   try {
     body = await response.json();
   } catch {
-    // Keep HTTP status as useful error.
+    // Keep default HTTP status.
   }
 
   if (!response.ok) {

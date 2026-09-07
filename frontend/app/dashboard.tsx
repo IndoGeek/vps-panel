@@ -8,6 +8,8 @@ import SessionManagement from "@/app/components/SessionManagement";
 
 import ServiceProcessManagement from "@/app/components/ServiceProcessManagement";
 
+import { NetworkSummaryCard, StorageSummaryCard } from "@/app/components/NetworkStorage";
+
 import SystemManagement, {
   SystemPowerControls,
   SystemResourceGrid,
@@ -469,29 +471,9 @@ export default function Dashboard({
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <div>
-                  <p className="text-sm text-zinc-500">Network</p>
+              <NetworkSummaryCard snapshot={snapshot} onViewSystem={() => changeView("system")} />
 
-                  <div className="mt-4 space-y-3">
-                    <div>
-                      <p className="text-xs text-zinc-600">Received</p>
-
-                      <p className="mt-1 text-sm font-medium">
-                        {formatBytes(snapshot.Metrics.network_rx_bytes)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-zinc-600">Transmitted</p>
-
-                      <p className="mt-1 text-sm font-medium">
-                        {formatBytes(snapshot.Metrics.network_tx_bytes)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </section>
+              <StorageSummaryCard snapshot={snapshot} onViewSystem={() => changeView("system")} />
             </section>
 
             <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
