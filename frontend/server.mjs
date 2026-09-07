@@ -1,52 +1,160 @@
 import { createServer } from "node:http";
 import { parse } from "node:url";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import next from "next";
 import WebSocket, { WebSocketServer } from "ws";
 
+/*
+ * --------------------------------------------------------------------------
+ * Environment loading
+ * --------------------------------------------------------------------------
+ *
+ * PM2 does NOT automatically load the project's .env file.
+ *
+ * The frontend lives at:
+ *
+ *   /home/tanmay/Code/vps-panel/frontend
+ *
+ * while the .env lives at:
+ *
+ *   /home/tanmay/Code/vps-panel/.env
+ *
+ * Load the project .env before reading configuration.
+ */
+
+function parseEnvValue(value) {
+  const trimmed = value.trim();
+
+  if (trimmed.length >= 2) {
+    if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+      return trimmed.slice(1, -1);
+    }
+
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+      return trimmed.slice(1, -1);
+    }
+  }
+
+  return trimmed;
+}
+
+function loadEnvFile(filePath) {
+  if (!existsSync(filePath)) {
+    return;
+  }
+
+  let content;
+
+  try {
+    content = readFileSync(filePath, "utf8");
+  } catch (error) {
+    process.stderr.write(`[ERROR] Failed to read environment file ${filePath}: ${error.message}\n`);
+
+    return;
+  }
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    let line = rawLine.trim();
+
+    if (line === "" || line.startsWith("#")) {
+      continue;
+    }
+
+    if (line.startsWith("export ")) {
+      line = line.slice(7).trim();
+    }
+
+    const separator = line.indexOf("=");
+
+    if (separator <= 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separator).trim();
+
+    const value = parseEnvValue(line.slice(separator + 1));
+
+    if (!key) {
+      continue;
+    }
+
+    /*
+     * Never override an environment variable already
+     * explicitly supplied by PM2/systemd/the shell.
+     */
+    if (process.env[key] !== undefined) {
+      continue;
+    }
+
+    process.env[key] = value;
+  }
+}
+
+function findProjectEnv() {
+  let current = process.cwd();
+
+  while (true) {
+    const candidate = path.join(current, ".env");
+
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parent = path.dirname(current);
+
+    if (parent === current) {
+      break;
+    }
+
+    current = parent;
+  }
+
+  return null;
+}
+
+const projectEnvPath = findProjectEnv();
+
+if (projectEnvPath) {
+  loadEnvFile(projectEnvPath);
+}
+
+/*
+ * --------------------------------------------------------------------------
+ * Configuration
+ * --------------------------------------------------------------------------
+ */
+
 const dev = process.env.NODE_ENV !== "production";
 
 const hostname = process.env.HOSTNAME || "0.0.0.0";
+
 const port = Number(process.env.PORT || 3000);
 
-/*
- * IMPORTANT:
- *
- * The frontend MUST connect to the Go backend.
- *
- * Backend:
- *
- *   127.0.0.1:8090
- *
- * Agent:
- *
- *   127.0.0.1:8091
- *
- * The backend is the authenticated boundary and already
- * contains the terminal WebSocket proxy.
- */
 const backendWsUrl = process.env.BACKEND_WS_URL || "ws://127.0.0.1:8090";
+
+/*
+ * Always use the central project log directory.
+ *
+ * This is intentionally NOT:
+ *
+ *   frontend/logs
+ *
+ * unless VPS_PANEL_LOG_DIR is explicitly changed.
+ */
+
+const logDirectory = process.env.VPS_PANEL_LOG_DIR || path.resolve(process.cwd(), "..", "logs");
+
+mkdirSync(logDirectory, {
+  recursive: true,
+});
 
 /*
  * --------------------------------------------------------------------------
  * Logging
  * --------------------------------------------------------------------------
- *
- * Logs are written to:
- *
- *   <project>/logs/frontend.log
- *   <project>/logs/terminal.log
- *
- * VPS_PANEL_LOG_DIR can override the directory.
  */
-
-const logDirectory = process.env.VPS_PANEL_LOG_DIR || path.resolve(process.cwd(), "logs");
-
-mkdirSync(logDirectory, {
-  recursive: true,
-});
 
 const ANSI = {
   reset: "\x1b[0m",
@@ -55,65 +163,6 @@ const ANSI = {
   red: "\x1b[31m",
   gray: "\x1b[90m",
 };
-
-function classifyMessage(message) {
-  const lower = String(message).toLowerCase();
-
-  if (
-    lower.includes("error") ||
-    lower.includes("failed") ||
-    lower.includes("failure") ||
-    lower.includes("fatal") ||
-    lower.includes("exception") ||
-    lower.includes("timeout")
-  ) {
-    return {
-      name: "ERROR",
-      color: ANSI.red,
-    };
-  }
-
-  if (lower.includes("warn") || lower.includes("warning")) {
-    return {
-      name: "WARN",
-      color: ANSI.yellow,
-    };
-  }
-
-  if (lower.includes("debug")) {
-    return {
-      name: "DEBUG",
-      color: ANSI.gray,
-    };
-  }
-
-  return {
-    name: "INFO",
-    color: ANSI.cyan,
-  };
-}
-
-function createLogger(fileName) {
-  const filePath = path.join(logDirectory, fileName);
-
-  return {
-    info(...values) {
-      writeLog(filePath, "INFO", values);
-    },
-
-    warn(...values) {
-      writeLog(filePath, "WARN", values);
-    },
-
-    error(...values) {
-      writeLog(filePath, "ERROR", values);
-    },
-
-    debug(...values) {
-      writeLog(filePath, "DEBUG", values);
-    },
-  };
-}
 
 function serializeValue(value) {
   if (value instanceof Error) {
@@ -131,48 +180,75 @@ function serializeValue(value) {
   }
 }
 
-function writeLog(filePath, explicitLevel, values) {
-  const timestamp = new Date().toISOString();
+function createLogger(fileName) {
+  const filePath = path.join(logDirectory, fileName);
 
-  const message = values.map(serializeValue).join(" ");
-
-  const detected = classifyMessage(message);
-
-  const level =
-    explicitLevel === "ERROR"
-      ? "ERROR"
-      : explicitLevel === "WARN"
-        ? "WARN"
-        : explicitLevel === "DEBUG"
-          ? "DEBUG"
-          : detected.name;
-
-  const color =
-    level === "ERROR"
-      ? ANSI.red
-      : level === "WARN"
-        ? ANSI.yellow
-        : level === "DEBUG"
-          ? ANSI.gray
-          : ANSI.cyan;
-
-  const plainLine = `${timestamp} [${level}] ${message}\n`;
-
-  const terminalLine = `${color}${timestamp} [${level}]${ANSI.reset} ${message}\n`;
-
+  /*
+   * Create the file immediately.
+   *
+   * This means terminal.log exists even before
+   * the first terminal connection.
+   */
   try {
-    appendFileSync(filePath, plainLine, {
+    appendFileSync(filePath, "", {
       encoding: "utf8",
     });
   } catch (error) {
     process.stderr.write(
       `${ANSI.red}[ERROR]${ANSI.reset} ` +
-        `Failed to write log file ${filePath}: ` +
+        `Unable to create log file ${filePath}: ` +
         `${error.message}\n`,
     );
   }
 
-  process.stdout.write(terminalLine);
+  function write(level, values) {
+    const timestamp = new Date().toISOString();
+
+    const message = values.map(serializeValue).join(" ");
+
+    const color =
+      level === "ERROR"
+        ? ANSI.red
+        : level === "WARN"
+          ? ANSI.yellow
+          : level === "DEBUG"
+            ? ANSI.gray
+            : ANSI.cyan;
+
+    const plainLine = `${timestamp} [${level}] ${message}\n`;
+
+    const terminalLine = `${color}${timestamp} [${level}]${ANSI.reset} ` + `${message}\n`;
+
+    try {
+      appendFileSync(filePath, plainLine, {
+        encoding: "utf8",
+      });
+    } catch (error) {
+      process.stderr.write(
+        `${ANSI.red}[ERROR]${ANSI.reset} ` + `Failed writing ${filePath}: ` + `${error.message}\n`,
+      );
+    }
+
+    process.stdout.write(terminalLine);
+  }
+
+  return {
+    info(...values) {
+      write("INFO", values);
+    },
+
+    warn(...values) {
+      write("WARN", values);
+    },
+
+    error(...values) {
+      write("ERROR", values);
+    },
+
+    debug(...values) {
+      write("DEBUG", values);
+    },
+  };
 }
 
 const logger = createLogger("frontend.log");
@@ -181,7 +257,15 @@ const terminalLogger = createLogger("terminal.log");
 
 logger.info("Starting VPS Panel frontend server.");
 
-logger.info(`Terminal backend URL: ${backendWsUrl}`);
+logger.info(`Environment: NODE_ENV=${process.env.NODE_ENV || "<unset>"}`);
+
+logger.info(`Project .env: ${projectEnvPath || "<not found>"}`);
+
+logger.info(`Log directory: ${logDirectory}`);
+
+logger.info(`Backend WebSocket URL: ${backendWsUrl}`);
+
+logger.info(`Frontend bind: ${hostname}:${port}`);
 
 /*
  * --------------------------------------------------------------------------
@@ -199,13 +283,19 @@ const handle = app.getRequestHandler();
 
 await app.prepare();
 
+/*
+ * --------------------------------------------------------------------------
+ * HTTP server
+ * --------------------------------------------------------------------------
+ */
+
 const server = createServer(async (req, res) => {
   try {
     const parsedUrl = parse(req.url, true);
 
     await handle(req, res, parsedUrl);
   } catch (error) {
-    logger.error("Next.js request error:", error);
+    logger.error("Next.js request error.", error);
 
     if (!res.headersSent) {
       res.statusCode = 500;
@@ -216,28 +306,48 @@ const server = createServer(async (req, res) => {
 
 /*
  * --------------------------------------------------------------------------
- * Browser WebSocket server
+ * WebSocket server
  * --------------------------------------------------------------------------
  */
 
 const websocketServer = new WebSocketServer({
   noServer: true,
+
+  /*
+   * Terminal traffic does not need
+   * compression.
+   */
   perMessageDeflate: false,
+
+  maxPayload: 1024 * 1024,
 });
 
 /*
  * --------------------------------------------------------------------------
- * WebSocket upgrade
+ * HTTP -> WebSocket upgrade
  * --------------------------------------------------------------------------
  */
 
 server.on("upgrade", (request, socket, head) => {
+  const rawUrl = request.url || "/";
+
+  terminalLogger.info(
+    "HTTP upgrade request received.",
+    `url=${rawUrl}`,
+    `host=${request.headers.host || "<missing>"}`,
+    `upgrade=${request.headers.upgrade || "<missing>"}`,
+    `connection=${request.headers.connection || "<missing>"}`,
+    `origin=${request.headers.origin || "<missing>"}`,
+    `remote=${request.socket.remoteAddress || "<unknown>"}`,
+    `cookie=${request.headers.cookie ? "present" : "missing"}`,
+  );
+
   let requestUrl;
 
   try {
-    requestUrl = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
+    requestUrl = new URL(rawUrl, `http://${request.headers.host || "localhost"}`);
   } catch (error) {
-    terminalLogger.error("Invalid WebSocket URL:", error);
+    terminalLogger.error("Invalid WebSocket URL.", error);
 
     socket.destroy();
 
@@ -245,36 +355,53 @@ server.on("upgrade", (request, socket, head) => {
   }
 
   /*
-   * Only our terminal endpoint belongs
-   * to this custom WebSocket proxy.
+   * Only /terminal-ws is handled here.
    */
   if (requestUrl.pathname !== "/terminal-ws") {
+    terminalLogger.warn(
+      "WebSocket request rejected because path is not /terminal-ws.",
+      `path=${requestUrl.pathname}`,
+    );
+
     socket.destroy();
 
     return;
   }
 
+  const session = requestUrl.searchParams.get("name") || "<missing>";
+
   terminalLogger.info(
     "Browser terminal WebSocket upgrade requested.",
+    `session=${session}`,
     `path=${requestUrl.pathname}`,
     `query=${requestUrl.search}`,
     `remote=${request.socket.remoteAddress || "<unknown>"}`,
   );
 
   /*
-   * Accept the browser WebSocket FIRST.
-   *
-   * This is important.
-   *
-   * If the backend is unavailable, we can now send
-   * an actual WebSocket close frame instead of simply
-   * destroying the raw HTTP socket.
+   * Accept the browser WebSocket.
    */
   websocketServer.handleUpgrade(request, socket, head, (browserSocket) => {
+    terminalLogger.info("Browser WebSocket handshake accepted.", `session=${session}`);
+
     websocketServer.emit("connection", browserSocket, request);
 
     handleTerminalConnection(browserSocket, request, requestUrl);
   });
+});
+
+/*
+ * Raw HTTP socket errors.
+ *
+ * This catches failures that happen before
+ * WebSocket connection establishment.
+ */
+server.on("clientError", (error, socket) => {
+  terminalLogger.error("HTTP client socket error.", error);
+
+  try {
+    socket.destroy();
+  } catch {}
 });
 
 /*
@@ -289,13 +416,6 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
 
   const session = requestUrl.searchParams.get("name") || "<missing>";
 
-  /*
-   * Build backend WebSocket URL.
-   *
-   * IMPORTANT:
-   *
-   * This MUST resolve to port 8090.
-   */
   const backendUrl = new URL(backendWsUrl);
 
   backendUrl.pathname = "/api/v1/tmux/connect";
@@ -303,10 +423,7 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
   backendUrl.search = requestUrl.search;
 
   /*
-   * Forward authentication cookies.
-   *
-   * The backend uses the user's session
-   * cookie to authenticate the terminal.
+   * Forward the authentication cookie.
    */
   const headers = {};
 
@@ -315,12 +432,7 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
   }
 
   /*
-   * Forward useful proxy information.
-   *
-   * Do NOT forward the browser Origin.
-   *
-   * The backend accepts the internal WebSocket
-   * connection without an Origin header.
+   * Forward proxy information.
    */
   if (request.headers["x-forwarded-for"]) {
     headers["x-forwarded-for"] = request.headers["x-forwarded-for"];
@@ -332,17 +444,19 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
     "Opening backend terminal WebSocket.",
     `session=${session}`,
     `target=${backendUrl.toString()}`,
+    `cookie=${headers.cookie ? "forwarded" : "missing"}`,
   );
 
   const backendSocket = new WebSocket(backendUrl.toString(), {
     headers,
+
     perMessageDeflate: false,
 
     handshakeTimeout: 10000,
   });
 
   /*
-   * Close helper.
+   * Close browser helper.
    */
   const closeBrowser = (code, reason) => {
     if (
@@ -355,6 +469,9 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
     }
   };
 
+  /*
+   * Close backend helper.
+   */
   const closeBackend = (code = 1000, reason = "proxy closed") => {
     if (
       backendSocket.readyState === WebSocket.OPEN ||
@@ -367,7 +484,7 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
   };
 
   /*
-   * Backend WebSocket opened.
+   * Backend connected.
    */
   backendSocket.on("open", () => {
     backendOpened = true;
@@ -380,11 +497,8 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
   });
 
   /*
-   * Very important diagnostic event.
-   *
-   * This catches HTTP 401/404/500 responses
-   * instead of hiding them behind a generic
-   * WebSocket error.
+   * Backend returned an HTTP error
+   * instead of 101 Switching Protocols.
    */
   backendSocket.on("unexpected-response", async (_request, response) => {
     let body = "";
@@ -412,7 +526,7 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
   });
 
   /*
-   * Backend error.
+   * Backend connection error.
    */
   backendSocket.on("error", (error) => {
     terminalLogger.error("Backend terminal WebSocket error.", `session=${session}`, error);
@@ -439,11 +553,6 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
 
     closed = true;
 
-    /*
-     * Never expose the backend's internal
-     * close code directly to the browser if
-     * it is outside the valid browser range.
-     */
     closeBrowser(code >= 1000 && code <= 4999 ? code : 1011, "backend disconnected");
   });
 
@@ -534,10 +643,7 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
   });
 
   /*
-   * Keep the browser <-> frontend hop alive.
-   *
-   * The Go backend already has its own
-   * frontend <-> agent heartbeat.
+   * Keep both WebSocket hops alive.
    */
   const heartbeat = setInterval(() => {
     if (closed) {
@@ -612,9 +718,11 @@ function handleTerminalConnection(browserSocket, request, requestUrl) {
 }
 
 /*
- * Read a failed WebSocket HTTP response body
- * for diagnostics.
+ * --------------------------------------------------------------------------
+ * Backend HTTP error body reader
+ * --------------------------------------------------------------------------
  */
+
 function readResponseBody(response) {
   return new Promise((resolve) => {
     let body = "";
@@ -626,7 +734,7 @@ function readResponseBody(response) {
     });
 
     response.on("end", () => {
-      resolve(body.slice(0, 2000));
+      resolve(body.slice(0, 4000));
     });
 
     response.on("error", () => {
@@ -637,7 +745,7 @@ function readResponseBody(response) {
 
 /*
  * --------------------------------------------------------------------------
- * HTTP server
+ * HTTP server startup
  * --------------------------------------------------------------------------
  */
 
@@ -647,8 +755,26 @@ server.listen(port, hostname, () => {
   logger.info("Terminal WebSocket endpoint: /terminal-ws");
 
   logger.info("Terminal upstream:", `${backendWsUrl}/api/v1/tmux/connect`);
+
+  terminalLogger.info(
+    "Terminal WebSocket subsystem initialized.",
+    `endpoint=/terminal-ws`,
+    `upstream=${backendWsUrl}/api/v1/tmux/connect`,
+  );
 });
 
 server.on("error", (error) => {
-  logger.error("Frontend HTTP server error:", error);
+  logger.error("Frontend HTTP server error.", error);
+});
+
+process.on("SIGINT", () => {
+  logger.info("Frontend received SIGINT. Shutting down.");
+
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  logger.info("Frontend received SIGTERM. Shutting down.");
+
+  process.exit(0);
 });

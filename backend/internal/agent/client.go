@@ -36,6 +36,22 @@ func (c *Client) Snapshot() ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(
+			resp.Body,
+		)
+
+		message := strings.TrimSpace(
+			string(body),
+		)
+
+		if message != "" {
+			return nil, fmt.Errorf(
+				"agent returned status %s: %s",
+				resp.Status,
+				message,
+			)
+		}
+
 		return nil, fmt.Errorf(
 			"agent returned status %s",
 			resp.Status,
@@ -83,7 +99,9 @@ func (c *Client) ListTmuxSessions() (
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(
+			resp.Body,
+		)
 
 		message := strings.TrimSpace(
 			string(body),
@@ -185,7 +203,9 @@ func (c *Client) doTmuxJSON(
 			return err
 		}
 
-		requestBody = bytes.NewReader(data)
+		requestBody = bytes.NewReader(
+			data,
+		)
 	}
 
 	parsed, err := url.Parse(
@@ -204,10 +224,6 @@ func (c *Client) doTmuxJSON(
 		)
 	}
 
-	/*
-		POSTing to an existing session with no JSON body
-		is our detach operation.
-	*/
 	if method == http.MethodPost &&
 		body == nil &&
 		session != "" {
@@ -235,7 +251,9 @@ func (c *Client) doTmuxJSON(
 		)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(
+		req,
+	)
 	if err != nil {
 		return err
 	}
@@ -245,9 +263,7 @@ func (c *Client) doTmuxJSON(
 	if resp.StatusCode < 200 ||
 		resp.StatusCode >= 300 {
 
-		responseBody, _ := io.ReadAll(
-			resp.Body,
-		)
+		responseBody, _ := io.ReadAll(resp.Body)
 
 		message := strings.TrimSpace(
 			string(responseBody),
@@ -281,6 +297,7 @@ func (c *Client) ConnectTmuxSession(
 	}
 
 	parsed.Scheme = "ws"
+
 	parsed.Path = "/api/v1/tmux/connect"
 
 	query := parsed.Query()
@@ -292,12 +309,50 @@ func (c *Client) ConnectTmuxSession(
 
 	parsed.RawQuery = query.Encode()
 
-	conn, _, err := websocket.DefaultDialer.Dial(
+	conn, response, err := websocket.DefaultDialer.Dial(
 		parsed.String(),
 		nil,
 	)
 	if err != nil {
-		return nil, err
+		/*
+		 * websocket.Dial returns an HTTP response
+		 * when the server rejected the upgrade.
+		 *
+		 * Preserve that information instead of
+		 * returning only:
+		 *
+		 *   websocket: bad handshake
+		 */
+
+		if response != nil {
+			body, _ := io.ReadAll(
+				response.Body,
+			)
+
+			_ = response.Body.Close()
+
+			message := strings.TrimSpace(
+				string(body),
+			)
+
+			if message != "" {
+				return nil, fmt.Errorf(
+					"agent websocket handshake failed: HTTP %s: %s",
+					response.Status,
+					message,
+				)
+			}
+
+			return nil, fmt.Errorf(
+				"agent websocket handshake failed: HTTP %s",
+				response.Status,
+			)
+		}
+
+		return nil, fmt.Errorf(
+			"agent websocket connection failed: %w",
+			err,
+		)
 	}
 
 	return conn, nil
