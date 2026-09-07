@@ -16,13 +16,18 @@ import (
 func main() {
 	cfg := config.Load()
 
-	authService, err := auth.New(auth.Config{
-		Username:     cfg.AuthUsername,
-		PasswordHash: cfg.AuthPasswordHash,
-		LinuxUser:    cfg.AuthLinuxUser,
-		CookieName:   "vps_panel_session",
-		SessionTTL:   12 * time.Hour,
-	})
+	verifier := auth.NewAgentVerifier(
+		cfg.AuthAgentURL,
+		cfg.AgentAuthToken,
+	)
+
+	authService, err := auth.New(
+		auth.Config{
+			CookieName: "vps_panel_session",
+			SessionTTL: 12 * time.Hour,
+		},
+		verifier,
+	)
 	if err != nil {
 		log.Fatalf(
 			"authentication initialization failed: %v",

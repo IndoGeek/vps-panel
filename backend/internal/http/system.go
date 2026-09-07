@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,11 +22,6 @@ func NewRouterWithSystem(
 		auditStore,
 		agentURL,
 	)
-
-	/*
-		Management is placed behind the authenticated backend
-		before the system-power wrapper.
-	*/
 
 	managementRouter := managementWrapper(
 		baseRouter,
@@ -115,6 +111,86 @@ func handleSystemPower(
 			w,
 			"invalid system action",
 			http.StatusBadRequest,
+		)
+
+		return
+	}
+
+	var request struct {
+		Password string `json:"password"`
+	}
+
+	if r.Body != nil {
+		if err := json.NewDecoder(
+			r.Body,
+		).Decode(&request); err != nil &&
+			err.Error() != "EOF" {
+
+			http.Error(
+				w,
+				"invalid request body",
+				http.StatusBadRequest,
+			)
+
+			return
+		}
+	}
+
+	if strings.TrimSpace(request.Password) == "" {
+		writeSystemJSON(
+			w,
+			http.StatusPreconditionRequired,
+			map[string]any{
+				"success": false,
+				"error":   "elevated authentication required",
+			},
+		)
+
+		return
+	}
+
+	if err := authService.VerifyElevated(
+		currentIdentity,
+		request.Password,
+	); err != nil {
+		message := "elevated authentication failed"
+
+		if errors.Is(
+			err,
+			auth.ErrInvalidCredentials,
+		) {
+			message = "invalid password"
+		}
+
+		if errors.Is(
+			err,
+			auth.ErrNotSudo,
+		) {
+			message = "your Linux user is not authorized for elevated operations"
+		}
+
+		_ = auditStore.Record(
+			r.Context(),
+			audit.Event{
+				Username:     currentIdentity.Username,
+				Action:       "system." + action,
+				ResourceType: "system",
+				ResourceName: action,
+				Status:       "denied",
+				IPAddress:    clientIPAddress(r),
+				UserAgent:    r.UserAgent(),
+				Details:      message,
+			},
+		)
+
+		writeSystemJSON(
+			w,
+			http.StatusForbidden,
+			map[string]any{
+				"success": false,
+				"action":  action,
+				"error":   message,
+			},
 		)
 
 		return

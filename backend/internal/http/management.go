@@ -89,6 +89,7 @@ func handleServiceList(
 			"unauthorized",
 			http.StatusUnauthorized,
 		)
+
 		return
 	}
 
@@ -129,6 +130,7 @@ func handleServiceAction(
 			"method not allowed",
 			http.StatusMethodNotAllowed,
 		)
+
 		return
 	}
 
@@ -140,6 +142,7 @@ func handleServiceAction(
 			"unauthorized",
 			http.StatusUnauthorized,
 		)
+
 		return
 	}
 
@@ -160,6 +163,7 @@ func handleServiceAction(
 			"invalid service path",
 			http.StatusBadRequest,
 		)
+
 		return
 	}
 
@@ -172,6 +176,89 @@ func handleServiceAction(
 			"invalid service action",
 			http.StatusBadRequest,
 		)
+
+		return
+	}
+
+	var request struct {
+		Password string `json:"password"`
+	}
+
+	if r.Body != nil {
+		if err := json.NewDecoder(
+			r.Body,
+		).Decode(&request); err != nil &&
+			err.Error() != "EOF" {
+
+			http.Error(
+				w,
+				"invalid request body",
+				http.StatusBadRequest,
+			)
+
+			return
+		}
+	}
+
+	/*
+		Every system-service operation is elevated.
+	*/
+	if strings.TrimSpace(request.Password) == "" {
+		writeJSON(
+			w,
+			http.StatusPreconditionRequired,
+			map[string]any{
+				"success": false,
+				"error":   "elevated authentication required",
+			},
+		)
+
+		return
+	}
+
+	if err := authService.VerifyElevated(
+		currentIdentity,
+		request.Password,
+	); err != nil {
+		status := http.StatusForbidden
+		message := "elevated authentication failed"
+
+		if errors.Is(
+			err,
+			auth.ErrInvalidCredentials,
+		) {
+			message = "invalid password"
+		}
+
+		if errors.Is(
+			err,
+			auth.ErrNotSudo,
+		) {
+			message = "your Linux user is not authorized for elevated operations"
+		}
+
+		recordManagementAudit(
+			r,
+			auditStore,
+			audit.Event{
+				Username:     currentIdentity.Username,
+				Action:       "service." + action,
+				ResourceType: "service",
+				ResourceName: serviceName,
+				Status:       "denied",
+				Details:      message,
+			},
+		)
+
+		writeJSON(
+			w,
+			status,
+			map[string]any{
+				"success": false,
+				"error":   message,
+			},
+		)
+
 		return
 	}
 
@@ -237,6 +324,7 @@ func handleProcessList(
 			"unauthorized",
 			http.StatusUnauthorized,
 		)
+
 		return
 	}
 
@@ -277,6 +365,7 @@ func handleProcessAction(
 			"method not allowed",
 			http.StatusMethodNotAllowed,
 		)
+
 		return
 	}
 
@@ -288,6 +377,7 @@ func handleProcessAction(
 			"unauthorized",
 			http.StatusUnauthorized,
 		)
+
 		return
 	}
 
@@ -308,6 +398,7 @@ func handleProcessAction(
 			"invalid process path",
 			http.StatusBadRequest,
 		)
+
 		return
 	}
 
@@ -319,24 +410,26 @@ func handleProcessAction(
 			"invalid PID",
 			http.StatusBadRequest,
 		)
+
 		return
 	}
 
 	var request struct {
-		Signal string `json:"signal"`
+		Signal   string `json:"signal"`
+		Password string `json:"password"`
 	}
 
-	decodeErr := json.NewDecoder(
+	if err := json.NewDecoder(
 		r.Body,
-	).Decode(&request)
+	).Decode(&request); err != nil &&
+		err.Error() != "EOF" {
 
-	if decodeErr != nil &&
-		decodeErr.Error() != "EOF" {
 		http.Error(
 			w,
 			"invalid request body",
 			http.StatusBadRequest,
 		)
+
 		return
 	}
 
@@ -352,12 +445,121 @@ func handleProcessAction(
 		request.Signal != "SIGTERM" &&
 		request.Signal != "KILL" &&
 		request.Signal != "SIGKILL" {
+
 		http.Error(
 			w,
 			"unsupported process signal",
 			http.StatusBadRequest,
 		)
+
 		return
+	}
+
+	/*
+		Determine who owns the target process.
+
+		This is deliberately done by the backend rather than
+		trusting the browser.
+	*/
+	processes, err := client.ListProcesses()
+	if err != nil {
+		writeManagementAgentError(
+			w,
+			err,
+		)
+
+		return
+	}
+
+	var target *agent.ManagedProcess
+
+	for index := range processes {
+		if processes[index].PID == pid {
+			target = &processes[index]
+			break
+		}
+	}
+
+	if target == nil {
+		writeJSON(
+			w,
+			http.StatusNotFound,
+			map[string]any{
+				"success": false,
+				"error":   "process not found",
+			},
+		)
+
+		return
+	}
+
+	/*
+		Processes owned by the currently authenticated Linux
+		user do not require another password.
+
+		Root/system/other-user processes require elevation.
+	*/
+	requiresElevation :=
+		target.User != currentIdentity.LinuxUser
+
+	if requiresElevation {
+		if strings.TrimSpace(request.Password) == "" {
+			writeJSON(
+				w,
+				http.StatusPreconditionRequired,
+				map[string]any{
+					"success": false,
+					"error":   "elevated authentication required",
+				},
+			)
+
+			return
+		}
+
+		if err := authService.VerifyElevated(
+			currentIdentity,
+			request.Password,
+		); err != nil {
+			message := "elevated authentication failed"
+
+			if errors.Is(
+				err,
+				auth.ErrInvalidCredentials,
+			) {
+				message = "invalid password"
+			}
+
+			if errors.Is(
+				err,
+				auth.ErrNotSudo,
+			) {
+				message = "your Linux user is not authorized for elevated operations"
+			}
+
+			recordManagementAudit(
+				r,
+				auditStore,
+				audit.Event{
+					Username:     currentIdentity.Username,
+					Action:       "process.kill",
+					ResourceType: "process",
+					ResourceName: strconv.Itoa(pid),
+					Status:       "denied",
+					Details:      message,
+				},
+			)
+
+			writeJSON(
+				w,
+				http.StatusForbidden,
+				map[string]any{
+					"success": false,
+					"error":   message,
+				},
+			)
+
+			return
+		}
 	}
 
 	err = client.KillProcess(
@@ -410,7 +612,9 @@ func handleProcessAction(
 	)
 }
 
-func isServiceAction(action string) bool {
+func isServiceAction(
+	action string,
+) bool {
 	switch action {
 	case "start",
 		"stop",

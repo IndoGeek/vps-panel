@@ -377,6 +377,52 @@ export async function deleteTmuxSessions(names: string[]): Promise<SessionDelete
 
 /*
  * --------------------------------------------------------------------------
+ * Elevated authentication
+ * --------------------------------------------------------------------------
+ */
+
+async function requestElevationPassword(): Promise<string> {
+  if (typeof window === "undefined") {
+    throw new Error("Elevated authentication is only available in the browser.");
+  }
+
+  const password = window.prompt(
+    "Administrator authentication required.\n\nEnter your Linux VPS password:",
+  );
+
+  if (password === null) {
+    throw new Error("Elevated authentication cancelled.");
+  }
+
+  if (!password) {
+    throw new Error("Password is required.");
+  }
+
+  return password;
+}
+
+function addPasswordToBody(body: BodyInit | null | undefined, password: string): BodyInit {
+  let parsed: Record<string, unknown> = {};
+
+  if (typeof body === "string" && body.trim() !== "") {
+    try {
+      const value = JSON.parse(body);
+
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        parsed = value as Record<string, unknown>;
+      }
+    } catch {
+      parsed = {};
+    }
+  }
+
+  parsed.password = password;
+
+  return JSON.stringify(parsed);
+}
+
+/*
+ * --------------------------------------------------------------------------
  * System power management
  * --------------------------------------------------------------------------
  */
@@ -390,14 +436,36 @@ export type SystemPowerResponse = {
 };
 
 export async function requestSystemPower(action: SystemPowerAction): Promise<SystemPowerResponse> {
-  const response = await fetch(`/api/v1/system/${action}`, {
-    method: "POST",
-    credentials: "include",
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-    },
-  });
+  const send = async (password?: string) => {
+    const body = password
+      ? JSON.stringify({
+          password,
+        })
+      : undefined;
+
+    return fetch(`/api/v1/system/${action}`, {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        ...(body
+          ? {
+              "Content-Type": "application/json",
+            }
+          : {}),
+      },
+      body,
+    });
+  };
+
+  let response = await send();
+
+  if (response.status === 428) {
+    const password = await requestElevationPassword();
+
+    response = await send(password);
+  }
 
   if (response.status === 401) {
     throw new Error("UNAUTHORIZED");
@@ -445,22 +513,39 @@ export type ProcessKillResponse = {
 };
 
 async function managementRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    ...options,
-    credentials: "include",
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
+  const send = async (password?: string) => {
+    let body = options.body;
 
-      ...(options.body
-        ? {
-            "Content-Type": "application/json",
-          }
-        : {}),
+    if (password) {
+      body = addPasswordToBody(body, password);
+    }
 
-      ...(options.headers ?? {}),
-    },
-  });
+    return fetch(path, {
+      ...options,
+      credentials: "include",
+      cache: "no-store",
+      body,
+      headers: {
+        Accept: "application/json",
+
+        ...(body
+          ? {
+              "Content-Type": "application/json",
+            }
+          : {}),
+
+        ...(options.headers ?? {}),
+      },
+    });
+  };
+
+  let response = await send();
+
+  if (response.status === 428) {
+    const password = await requestElevationPassword();
+
+    response = await send(password);
+  }
 
   if (response.status === 401) {
     throw new Error("UNAUTHORIZED");

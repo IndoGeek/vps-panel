@@ -12,67 +12,71 @@ type Config struct {
 	Host string
 	Port string
 
-	AuthUsername     string
-	AuthPasswordHash string
-	AuthLinuxUser    string
-
 	DatabaseDSN string
-	AgentURL    string
+
+	AgentURL string
+
+	AuthAgentURL   string
+	AgentAuthToken string
 }
 
 func Load() Config {
 	loadDotEnv()
 
-	host := os.Getenv("VPS_PANEL_HOST")
+	host := os.Getenv(
+		"VPS_PANEL_HOST",
+	)
 
 	if host == "" {
 		host = "127.0.0.1"
 	}
 
-	port := os.Getenv("VPS_PANEL_PORT")
+	port := os.Getenv(
+		"VPS_PANEL_PORT",
+	)
 
 	if port == "" {
 		port = "8090"
 	}
 
-	agentURL := os.Getenv("VPS_PANEL_AGENT_URL")
+	agentURL := os.Getenv(
+		"VPS_PANEL_AGENT_URL",
+	)
 
 	if agentURL == "" {
 		agentURL = "http://127.0.0.1:8091"
+	}
+
+	authAgentURL := os.Getenv(
+		"VPS_PANEL_AUTH_AGENT_URL",
+	)
+
+	if authAgentURL == "" {
+		authAgentURL = "http://127.0.0.1:8092"
 	}
 
 	return Config{
 		Host: host,
 		Port: port,
 
-		AuthUsername:     os.Getenv("VPS_PANEL_AUTH_USERNAME"),
-		AuthPasswordHash: os.Getenv("VPS_PANEL_AUTH_PASSWORD_HASH"),
-		AuthLinuxUser:    os.Getenv("VPS_PANEL_AUTH_LINUX_USER"),
+		DatabaseDSN: os.Getenv(
+			"VPS_PANEL_DB_DSN",
+		),
 
-		DatabaseDSN: os.Getenv("VPS_PANEL_DB_DSN"),
-		AgentURL:    agentURL,
+		AgentURL: agentURL,
+
+		AuthAgentURL: authAgentURL,
+
+		AgentAuthToken: os.Getenv(
+			"VPS_PANEL_AGENT_AUTH_TOKEN",
+		),
 	}
 }
 
-/*
-loadDotEnv loads the project .env file.
-
-The loader intentionally does NOT overwrite environment
-variables that already exist.
-
-This allows the same application to work with:
-
-- a local root .env
-- shell environment variables
-- systemd EnvironmentFile
-- container environment variables
-
-The project .env is normally located at:
-
-vps-panel/.env
-*/
 func loadDotEnv() {
-	envPath := os.Getenv("VPS_PANEL_ENV_FILE")
+	envPath := os.Getenv(
+		"VPS_PANEL_ENV_FILE",
+	)
 
 	if envPath != "" {
 		loadEnvFile(envPath)
@@ -100,11 +104,14 @@ func findProjectEnvFile() string {
 			".env",
 		)
 
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		if info, err := os.Stat(candidate); err == nil &&
+			!info.IsDir() {
 			return candidate
 		}
 
-		parent := filepath.Dir(currentDir)
+		parent := filepath.Dir(
+			currentDir,
+		)
 
 		if parent == currentDir {
 			break
@@ -116,7 +123,9 @@ func findProjectEnvFile() string {
 	return ""
 }
 
-func loadEnvFile(path string) {
+func loadEnvFile(
+	path string,
+) {
 	file, err := os.Open(path)
 	if err != nil {
 		return
@@ -127,23 +136,31 @@ func loadEnvFile(path string) {
 	scanner := bufio.NewScanner(file)
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		line := strings.TrimSpace(
+			scanner.Text(),
+		)
 
-		if line == "" {
+		if line == "" ||
+			strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		if strings.HasPrefix(line, "export ") {
+		if strings.HasPrefix(
+			line,
+			"export ",
+		) {
 			line = strings.TrimSpace(
-				strings.TrimPrefix(line, "export "),
+				strings.TrimPrefix(
+					line,
+					"export ",
+				),
 			)
 		}
 
-		separator := strings.IndexByte(line, '=')
+		separator := strings.IndexByte(
+			line,
+			'=',
+		)
 
 		if separator <= 0 {
 			continue
@@ -163,32 +180,29 @@ func loadEnvFile(path string) {
 
 		value = parseEnvValue(value)
 
-		/*
-			Do not overwrite values already supplied
-			by the shell/system/container.
-		*/
 		if _, exists := os.LookupEnv(key); exists {
 			continue
 		}
 
-		_ = os.Setenv(key, value)
+		_ = os.Setenv(
+			key,
+			value,
+		)
 	}
 }
 
-func parseEnvValue(value string) string {
+func parseEnvValue(
+	value string,
+) string {
 	if len(value) < 2 {
 		return value
 	}
 
-	/*
-		Double quoted values.
-
-		This also allows escaped characters such as:
-		\" and \\.
-	*/
 	if strings.HasPrefix(value, `"`) &&
 		strings.HasSuffix(value, `"`) {
-		unquoted, err := strconv.Unquote(value)
+		unquoted, err := strconv.Unquote(
+			value,
+		)
 
 		if err == nil {
 			return unquoted
@@ -197,13 +211,6 @@ func parseEnvValue(value string) string {
 		return value[1 : len(value)-1]
 	}
 
-	/*
-		Single quoted values.
-
-		.env files commonly use single quotes for
-		passwords and other values containing special
-		characters.
-	*/
 	if strings.HasPrefix(value, "'") &&
 		strings.HasSuffix(value, "'") {
 		return value[1 : len(value)-1]
