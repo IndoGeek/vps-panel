@@ -34,3 +34,8 @@ logs/
 # Temporary
 .tmp/
 temp/
+
+# Webserver
+deploy/
+nginx/
+*.conf
